@@ -14,6 +14,7 @@ class TCPProtocol(asyncio.Protocol):
         self.is_server = is_server
         self.protoFactory = protoFactory
         self.proto = None
+        self.close_exc = None
     def connection_made(self, transport):
         self.transport = transport
         self.buffer = b''
@@ -27,7 +28,10 @@ class TCPProtocol(asyncio.Protocol):
             self.handshake = 1
     def connection_lost(self, exc):
         if self.proto != None:
-            self.proto.connection_lost(exc)
+            if exc != None:
+                self.proto.connection_lost(exc)
+            else:
+                self.proto.connection_lost(self.close_exc)
     def data_received(self, data):
         self.buffer = self.buffer + data
         if self.handshake == 0:
@@ -41,6 +45,7 @@ class TCPProtocol(asyncio.Protocol):
                 crypto_sign_verify_detached(signature, handshake_buf, device_key)
             except:
                 # error verify signature
+                self.close_exc = Exception('Invalid signature')
                 self.transport.close()
                 return
             #self.buffer = self.buffer[6 + keys.PK_SIZE + keys.SIGN_SIZE:]
@@ -64,6 +69,7 @@ class TCPProtocol(asyncio.Protocol):
             try:
                 crypto_sign_verify_detached(server_sig, signed_buf, server_pk)
             except:
+                self.close_exc = Exception('Invalid signature')
                 self.transport.close()
                 return
             # then complete
@@ -76,7 +82,7 @@ class TCPProtocol(asyncio.Protocol):
             self.recv_key = key[:32]
             self.send_key = key[32:]
             self.handshake = 3
-            # TODO: connected
+            # connected
             self.proto = self.protoFactory()
             self.proto._set_write_function(self.write)
             self.proto.connection_made()
@@ -90,6 +96,7 @@ class TCPProtocol(asyncio.Protocol):
                 crypto_sign_verify_detached(signature, client_kex_pk, self.device_key)
             except:
                 # error verify signature
+                self.close_exc = Exception('Invalid signature')
                 self.transport.close()
                 return
             shared_secret = crypto_scalarmult_curve25519(self.kex_sk, client_kex_pk)
@@ -99,7 +106,7 @@ class TCPProtocol(asyncio.Protocol):
             self.send_key = key[:32]
             self.recv_key = key[32:]
             self.handshake = 3
-            # TODO: connected
+            # connected
             self.proto = self.protoFactory()
             self.proto._set_write_function(self.write)
             self.proto.connection_made()
@@ -118,9 +125,10 @@ class TCPProtocol(asyncio.Protocol):
                     msg = crypto_aead_chacha20poly1305_ietf_decrypt(ct + tag, None, nonce, self.recv_key)
                 except:
                     # fail to decrypt
+                    self.close_exc = Exception('Invalid MAC')
                     self.transport.close()
                     return
-                # TODO: handle message
+                # handle message
                 self.proto.message_received(msg)
     def write(data):
         #if self.handshake != 3
