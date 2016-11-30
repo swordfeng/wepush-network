@@ -29,7 +29,7 @@ SIGN_SIZE = crypto_sign_BYTES
 
 KEY_SIZE = crypto_aead_chacha20poly1305_ietf_KEYBYTES
 NONCE_SIZE = crypto_aead_chacha20poly1305_ietf_NONCEBYTES
-TAG_SIZE = crypto_aead_chacha20poly1305_ABYTES
+TAG_SIZE = sodium.crypto_aead_chacha20poly1305_ietf_abytes()
 
 KEX_SK_SIZE = crypto_scalarmult_curve25519_BYTES
 KEX_PK_SIZE = crypto_scalarmult_curve25519_BYTES

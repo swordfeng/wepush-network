@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 
 import asyncio
-from pysodium import *
+from crypto import *
 import keys
 import struct
 
@@ -18,6 +18,7 @@ class TCPProtocol(asyncio.Protocol):
         self.close_exc = None
     def connection_made(self, transport):
         self.transport = transport
+        self._paused = False
         self.buffer = b''
         if self.is_server:
             self.handshake = 0
@@ -27,7 +28,7 @@ class TCPProtocol(asyncio.Protocol):
             signature = crypto_sign_detached(handshake_buf, keys.sk)
             self.transport.write(handshake_buf + signature)
             self.handshake = 1
-        self.wpproto._set_close_function(self.transport.close)
+        self.wpproto._set_proto(self)
     def connection_lost(self, exc):
         if exc == None:
             exc = self.close_exc
@@ -54,14 +55,13 @@ class TCPProtocol(asyncio.Protocol):
             #self.buffer = self.buffer[6 + keys.PK_SIZE + keys.SIGN_SIZE:]
             self.buffer = b'' # should have no more data
             kex_sk = randombytes(keys.KEX_SK_SIZE)
-            kex_pk = crypto_scalarmult_curve25519_base(key_sk)
+            kex_pk = crypto_scalarmult_curve25519_base(kex_sk)
             server_buf = b'\x43\x02\x82' + keys.pk + kex_pk
             server_sig = crypto_sign_detached(server_buf, keys.sk)
+            self.transport.write(server_buf + server_sig)
             self.kex_sk = kex_sk
             self.handshake = 2
-            self.device_key = device_key
-            self.wpproto._set_peer_key(device_key)
-            self.wpproto._set_peer_key(device_key)
+            self._peer_key = device_key
         elif self.handshake == 1:
             # parse server data
             if len(self.buffer) < 3+keys.PK_SIZE+keys.KEX_PK_SIZE+keys.SIGN_SIZE:
@@ -83,13 +83,12 @@ class TCPProtocol(asyncio.Protocol):
             signature = crypto_sign_detached(client_kex_pk, keys.sk)
             self.transport.write(client_kex_pk + signature)
             shared_secret = crypto_scalarmult_curve25519(kex_sk, kex_pk)
-            key = crypto_sha512(shared_secret)
+            key = crypto_hash_sha512(shared_secret)
             self.recv_key = key[:32]
             self.send_key = key[32:]
             self.handshake = 3
+            self._peer_key = server_pk
             # connected
-            self.wpproto._set_write_function(self.write)
-            self.wpproto._set_peer_key(server_pk)
             self.wpproto.connection_made()
         elif self.handshake == 2:
             # parse client data 2
@@ -98,23 +97,23 @@ class TCPProtocol(asyncio.Protocol):
             client_kex_pk = self.buffer[:keys.KEX_PK_SIZE]
             signature = self.buffer[keys.KEX_PK_SIZE:keys.KEX_PK_SIZE+keys.SIGN_SIZE]
             try:
-                crypto_sign_verify_detached(signature, client_kex_pk, self.device_key)
+                crypto_sign_verify_detached(signature, client_kex_pk, self._peer_key)
             except:
                 # error verify signature
                 self.close_exc = Exception('Invalid signature')
                 self.transport.close()
                 return
             shared_secret = crypto_scalarmult_curve25519(self.kex_sk, client_kex_pk)
-            key = crypto_sha512(shared_secret)
+            key = crypto_hash_sha512(shared_secret)
             del self.kex_sk
             self.buffer = self.buffer[keys.KEX_PK_SIZE+keys.SIGN_SIZE:]
             self.send_key = key[:32]
             self.recv_key = key[32:]
             self.handshake = 3
             # connected
-            self.wpproto._set_write_function(self.write)
             self.wpproto.connection_made()
-        else: # self.handshake == 3
+        # may have remain data after handshake
+        if self.handshake == 3:
             # unpack data, and send to upper object
             while len(self.buffer) >= 4 + keys.TAG_SIZE + keys.NONCE_SIZE:
                 length, = struct.unpack('<I', self.buffer[:4])
@@ -126,7 +125,7 @@ class TCPProtocol(asyncio.Protocol):
                 self.buffer = self.buffer[4+keys.TAG_SIZE+keys.NONCE_SIZE+length:]
                 try:
                     # sodium combined mode concats mac after ciphertext
-                    msg = crypto_aead_chacha20poly1305_ietf_decrypt(ct + tag, None, nonce, self.recv_key)
+                    msg = crypto_aead_chacha20poly1305_ietf_decrypt(ct + tag, b'', nonce, self.recv_key)
                 except:
                     # fail to decrypt
                     self.close_exc = Exception('Invalid MAC')
@@ -134,31 +133,44 @@ class TCPProtocol(asyncio.Protocol):
                     return
                 # handle message
                 self.wpproto.message_received(msg)
-    def write(data):
-        #if self.handshake != 3
+    def write(self, data):
+        if self.handshake != 3:
+            raise Exception('handshake not completed')
         # pack data with AEAD, write data
         length = len(data)
         nonce = randombytes(keys.NONCE_SIZE)
-        encrypted = crypto_aead_chacha20poly1305_ietf_encrypt(data, None, nonce, self.send_key)
+        encrypted = crypto_aead_chacha20poly1305_ietf_encrypt(data, b'', nonce, self.send_key)
         ct, tag = encrypted[:length], encrypted[length:]
         lenbuf = struct.pack('<I', length)
         self.transport.write(lenbuf + tag + nonce + ct)
+    def close(self):
+        self.transport.close()
+    def peer_key(self):
+        return self._peer_key
+    def pause(self):
+        if not self._paused:
+            self.transport.pause_reading()
+            self._paused = True
+    def resume(self):
+        if self._paused:
+            self.transport.resume_reading()
+            self._paused = False
 
 class WPProtocol:
     # internal functions
-    def _set_peer_key(self, peer_key):
-        self._peer_key = peer_key
-    def _set_write_function(self, write):
-        self._write = write
-    def _set_close_function(self, close):
-        self._close = close
+    def _set_proto(self, tcpproto):
+        self.tcpproto = tcpproto
     # exported interfaces
     def send_message(self, message):
-        self._write(message)
+        self.tcpproto.write(message)
     def peer_key(self):
-        return self._peer_key
+        return self.tcpproto.peer_key()
     def close(self):
-        self._close()
+        self.tcpproto.close()
+    def pause(self):
+        self.tcpproto.pause()
+    def resume(self):
+        self.tcpproto.resume()
     # overriden functions
     def handshake_failed(self, exc):
         pass
@@ -257,6 +269,6 @@ async def connect(addr):
 
 async def listen(addr, conn_handler):
     loop = asyncio.get_event_loop()
-    server = await asyncio.create_server(
-        lambda: TCPProtocol(lambda: WPListenerProtocol(conn_handler), addr[0], addr[1]))
+    server = await loop.create_server(
+        lambda: TCPProtocol(lambda: WPListenerProtocol(conn_handler), is_server=True), addr[0], addr[1])
     return server
