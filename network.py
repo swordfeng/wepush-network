@@ -104,7 +104,7 @@ class TCPProtocol(asyncio.Protocol):
                 self.buffer = self.buffer[4+keys.TAG_SIZE+keys.NONCE_SIZE+length:]
                 try:
                     # sodium combined mode concats mac after ciphertext
-                    msg = crypto_aead_chacha20poly1305_decrypt(ct + tag, None, nonce, self.key)
+                    msg = crypto_aead_chacha20poly1305_ietf_decrypt(ct + tag, None, nonce, self.key)
                 except:
                     # fail to decrypt
                     self.transport.close()
@@ -114,8 +114,14 @@ class TCPProtocol(asyncio.Protocol):
     def eof_received(self):
         pass
     def write(data):
+        #if self.handshake != 3
         # pack data with AEAD, write data
-        pass
+        length = len(data)
+        nonce = randombytes(keys.NONCE_SIZE)
+        encrypted = crypto_aead_chacha20poly1305_ietf_encrypt(data, None, nonce, self.key)
+        ct, tag = encrypted[:length], encrypted[length:]
+        lenbuf = struct.pack('<I', length)
+        self.transport.write(lenbuf + tag + nonce + ct)
 
 class UDPProtocol(asyncio.DatagramProtocol):
     def __init__(self):
