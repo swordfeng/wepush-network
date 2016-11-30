@@ -10,8 +10,10 @@ import struct
 # 2 - server handshake
 # 3 - client complete
 class TCPProtocol(asyncio.Protocol):
-    def __init__(self, is_server = False):
+    def __init__(self, is_server = False, protoFactory):
         self.is_server = is_server
+        self.protoFactory = protoFactory
+        self.proto = None
     def connection_made(self, transport):
         self.transport = transport
         self.buffer = b''
@@ -24,7 +26,8 @@ class TCPProtocol(asyncio.Protocol):
             self.transport.write(handshake_buf + signature)
             self.handshake = 1
     def connection_lost(self, exc):
-        pass
+        if self.proto != None:
+            self.proto.connection_lost(exc)
     def data_received(self, data):
         self.buffer = self.buffer + data
         if self.handshake == 0:
@@ -69,10 +72,14 @@ class TCPProtocol(asyncio.Protocol):
             signature = crypto_sign_detached(client_kex_pk, keys.sk)
             self.transport.write(client_kex_pk + signature)
             shared_secret = crypto_scalarmult_curve25519(kex_sk, kex_pk)
-            key = crypto_sha256(shared_secret)
-            self.key = key
+            key = crypto_sha512(shared_secret)
+            self.recv_key = key[:32]
+            self.send_key = key[32:]
             self.handshake = 3
             # TODO: connected
+            self.proto = self.protoFactory()
+            self.proto._set_write_function(self.write)
+            self.proto.connection_made()
         elif self.handshake == 2:
             # parse client data 2
             if len(self.buffer) < keys.KEX_PK_SIZE + keys.SIGN_SIZE:
@@ -86,12 +93,16 @@ class TCPProtocol(asyncio.Protocol):
                 self.transport.close()
                 return
             shared_secret = crypto_scalarmult_curve25519(self.kex_sk, client_kex_pk)
-            key = crypto_sha256(shared_secret)
+            key = crypto_sha512(shared_secret)
             del self.kex_sk
             self.buffer = self.buffer[keys.KEX_PK_SIZE+keys.SIGN_SIZE:]
-            self.key = key
+            self.send_key = key[:32]
+            self.recv_key = key[32:]
             self.handshake = 3
             # TODO: connected
+            self.proto = self.protoFactory()
+            self.proto._set_write_function(self.write)
+            self.proto.connection_made()
         else: # self.handshake == 3
             # unpack data, and send to upper object
             while len(self.buffer) >= 4 + keys.TAG_SIZE + keys.NONCE_SIZE:
@@ -104,44 +115,28 @@ class TCPProtocol(asyncio.Protocol):
                 self.buffer = self.buffer[4+keys.TAG_SIZE+keys.NONCE_SIZE+length:]
                 try:
                     # sodium combined mode concats mac after ciphertext
-                    msg = crypto_aead_chacha20poly1305_ietf_decrypt(ct + tag, None, nonce, self.key)
+                    msg = crypto_aead_chacha20poly1305_ietf_decrypt(ct + tag, None, nonce, self.recv_key)
                 except:
                     # fail to decrypt
                     self.transport.close()
                     return
                 # TODO: handle message
-
-    def eof_received(self):
-        pass
+                self.proto.message_received(msg)
     def write(data):
         #if self.handshake != 3
         # pack data with AEAD, write data
         length = len(data)
         nonce = randombytes(keys.NONCE_SIZE)
-        encrypted = crypto_aead_chacha20poly1305_ietf_encrypt(data, None, nonce, self.key)
+        encrypted = crypto_aead_chacha20poly1305_ietf_encrypt(data, None, nonce, self.send_key)
         ct, tag = encrypted[:length], encrypted[length:]
         lenbuf = struct.pack('<I', length)
         self.transport.write(lenbuf + tag + nonce + ct)
 
-class UDPProtocol(asyncio.DatagramProtocol):
-    def __init__(self):
-        pass
-    def connection_made(self, transport):
-        pass
-    def connection_lost(self, exc):
-        pass
-    def datagram_received(self, data, addr):
-        pass
-    def error_received(self, exc):
-        pass
-
 class WPProtocol:
-    def set_write_function(write):
-    def connection_made(self, peer_key):
-    def connection_lost(self):
+    def _set_write_function(self, write):
+        self._write = write
+    def connection_made(self):
+    def connection_lost(self, exc):
     def message_received(self, message):
-    def eof_received(self):
-    def send_message(self):
-
-class WPTCPListener:
-    def __init__(protocolFactory):
+    def send_message(self, message):
+        self._write(message)
