@@ -1,0 +1,131 @@
+Security Protocol Design V1
+========================
+Handshake Steps:
+  1. client connect to server with accepted cipher type, device pkey, signature
+    version|accept_ciphers_len|accept_ciphers|device_key_type|device_key|signature_of_all
+  2. server reply with chosen cipher type, server pkey, g&G, g^a, signature
+    server_key_type|kex_type|AEAD_type|server_key|kex_aG|signature
+  3. client send g^b
+    key_bG|signature
+  4. now communicates with AEAD and message format:
+    length(4 bytes LE)|tag(size of tag)|nonce(size of nonce)|ciphertext(length bytes)
+Server and client now share the secret g^(ab), and derive enc_key, mac_key (if presend) from it
+Accepted Cipher Suites:
+    Kex: DHE(diffiehellman), ECDHE(pyelliptic for nist, pysodium for curve25519)
+    Signature: RSA(rsa), ECDSA(ecpy), [EDDSA](ecpy or pysodium)
+    AEAD: AES-GCM(pycryptodome), [CHACHA20-POLY1305](pysodium)
+Assigned Cipher Types:
+    0x01 DHE (2048)
+    0x02 ECDHE (curve25519)
+    0x41 RSA (2048)
+    0x42 RSA (4096)
+    0x43 EDDSA (ed25519)
+    0x81 AES-GCM (256)
+    0x82 CHACHA20-POLY1305 (IETF)
+Now we only support ECDHE(curve25519)-EDDSA(ed25519)-CHACHA20-POLY1305(IETF), aka [0x02,0x43,0x82]
+
+Communicate Protocol Design
+===========================
+Two modes:
+    1. JSON mode, when connection setup and end of file transfer
+    2. File mode, when receiving a get-file request (either server or client)
+General message format:
+    {
+        "message": "<request-type>",
+        ... other arguments
+    }
+General response format:
+    {
+        "success": true|false,
+        ["error": "<error message>",] // only presents when success == false
+    }
+JSON must be sent in a single message
+File can be split into multiple messages
+
+Client Messages
+---------------
+listen
+    this connection waits for server push
+    no params
+push
+    push a notification
+    params:
+        content_type: mime type?
+        content: content of notification
+        target: all devices or specific device?
+push_clipboard
+    push content of clipboard
+    params: (same as push?)
+push_file
+    push a file
+    params:
+        content_type: mime type?
+        target: all devices or specific device?
+        filename: filename
+        length: file length
+        digest: hashsum of file
+    response:
+        get_range: a range in the file
+    the client enter File Mode after a response with a get_range
+    the response may repeat several times until file is complete
+    until server respond without "get_range" in fields
+get_file
+    get a file pushed to this device
+    params:
+        digest: hashsum
+        get_range: a range in the file
+    server first send a response and, if success, enter File Mode
+    and send the file
+status
+    get register status from server
+    no params
+    response:
+        registered: true|false
+        user: username (if registered)
+        (and other info...)
+register_device
+    register this device as a specific user
+    params:
+        user: username
+        password: password
+    (server retrieve device pkey from connection info)
+register_user
+    register a new user
+    params: same as register_device
+
+Server Messages
+---------------
+push
+    push a notification
+    params:
+        content_type: mime type
+        content: content
+push_clipboard
+    push clipboard content
+    params: same as push
+push_file
+    notify the client that a file is pushed
+    params:
+        content_type: mime
+        filename: filename
+        length: file length
+        digest: hash
+    client invoke get_file request after this message
+restart_file
+    make a client retransmit a file
+    params:
+        digest: hash
+    client invoke push_file request after this message
+heartbeat
+    keep connection alive
+    no params
+    must be sent every 30 seconds by server
+
+A UDP-based stream protocol design
+==================================
+Packet types, Flow Control and Congestion control is
+similar to uTP.
+http://www.bittorrent.org/beps/bep_0029.html
+SYN-STATE-DATA handshake also includes Crypto Setup (as extension 0x80)
+Congestion Control:
+    target offset = 25ms
