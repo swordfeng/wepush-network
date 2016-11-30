@@ -4,6 +4,7 @@ from network import *
 import asyncio
 
 loop = asyncio.get_event_loop()
+server = None
 
 async def conn_handler(stream):
     print('new stream')
@@ -20,9 +21,12 @@ async def do_request():
     stream = await connect(('127.0.0.1', 12345))
     stream.write(b'hello')
     msg = await stream.read()
+    stream.close()
     print(msg)
+    server.close()
 
 async def main():
+    global server
     server = await listen(('0.0.0.0', 12345), lambda stream: asyncio.ensure_future(conn_handler(stream)))
     asyncio.ensure_future(do_request())
     await server.wait_closed()
