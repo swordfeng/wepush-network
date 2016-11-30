@@ -5,15 +5,16 @@ from pysodium import *
 import keys
 import struct
 
+READ_BUFFER_HIGH_WATER_MARK = 16
+
 # 0 - init
 # 1 - client handshake
 # 2 - server handshake
 # 3 - client complete
 class TCPProtocol(asyncio.Protocol):
-    def __init__(self, is_server = False, protoFactory):
+    def __init__(self, wpproto_factory, is_server = False):
         self.is_server = is_server
-        self.protoFactory = protoFactory
-        self.proto = None
+        self.wpproto = wpproto_factory()
         self.close_exc = None
     def connection_made(self, transport):
         self.transport = transport
@@ -26,12 +27,14 @@ class TCPProtocol(asyncio.Protocol):
             signature = crypto_sign_detached(handshake_buf, keys.sk)
             self.transport.write(handshake_buf + signature)
             self.handshake = 1
+        self.wpproto._set_close_function(self.transport.close)
     def connection_lost(self, exc):
-        if self.proto != None:
-            if exc != None:
-                self.proto.connection_lost(exc)
-            else:
-                self.proto.connection_lost(self.close_exc)
+        if exc == None:
+            exc = self.close_exc
+        if self.handshake == 3:
+            self.wpproto.connection_lost(exc)
+        else:
+            self.wpproto.handshake_failed(exc)
     def data_received(self, data):
         self.buffer = self.buffer + data
         if self.handshake == 0:
@@ -57,6 +60,8 @@ class TCPProtocol(asyncio.Protocol):
             self.kex_sk = kex_sk
             self.handshake = 2
             self.device_key = device_key
+            self.wpproto._set_peer_key(device_key)
+            self.wpproto._set_peer_key(device_key)
         elif self.handshake == 1:
             # parse server data
             if len(self.buffer) < 3+keys.PK_SIZE+keys.KEX_PK_SIZE+keys.SIGN_SIZE:
@@ -83,9 +88,9 @@ class TCPProtocol(asyncio.Protocol):
             self.send_key = key[32:]
             self.handshake = 3
             # connected
-            self.proto = self.protoFactory()
-            self.proto._set_write_function(self.write)
-            self.proto.connection_made()
+            self.wpproto._set_write_function(self.write)
+            self.wpproto._set_peer_key(server_pk)
+            self.wpproto.connection_made()
         elif self.handshake == 2:
             # parse client data 2
             if len(self.buffer) < keys.KEX_PK_SIZE + keys.SIGN_SIZE:
@@ -107,9 +112,8 @@ class TCPProtocol(asyncio.Protocol):
             self.recv_key = key[32:]
             self.handshake = 3
             # connected
-            self.proto = self.protoFactory()
-            self.proto._set_write_function(self.write)
-            self.proto.connection_made()
+            self.wpproto._set_write_function(self.write)
+            self.wpproto.connection_made()
         else: # self.handshake == 3
             # unpack data, and send to upper object
             while len(self.buffer) >= 4 + keys.TAG_SIZE + keys.NONCE_SIZE:
@@ -129,7 +133,7 @@ class TCPProtocol(asyncio.Protocol):
                     self.transport.close()
                     return
                 # handle message
-                self.proto.message_received(msg)
+                self.wpproto.message_received(msg)
     def write(data):
         #if self.handshake != 3
         # pack data with AEAD, write data
@@ -141,10 +145,118 @@ class TCPProtocol(asyncio.Protocol):
         self.transport.write(lenbuf + tag + nonce + ct)
 
 class WPProtocol:
+    # internal functions
+    def _set_peer_key(self, peer_key):
+        self._peer_key = peer_key
     def _set_write_function(self, write):
         self._write = write
-    def connection_made(self):
-    def connection_lost(self, exc):
-    def message_received(self, message):
+    def _set_close_function(self, close):
+        self._close = close
+    # exported interfaces
     def send_message(self, message):
         self._write(message)
+    def peer_key(self):
+        return self._peer_key
+    def close(self):
+        self._close()
+    # overriden functions
+    def handshake_failed(self, exc):
+        pass
+    def connection_made(self):
+        pass
+    def connection_lost(self, exc):
+        pass
+    def message_received(self, message):
+        pass
+
+class WPStreamProtocol(WPProtocol):
+    def __init__(self, stream_future):
+        self.stream_future = stream_future
+    def handshake_failed(self, exc):
+        self.stream_future.set_exception(exc)
+    def connection_made(self):
+        stream = WPStream(self)
+        self.stream_future.set_result(stream)
+        self.stream = stream
+    def connection_lost(self, exc):
+        self.stream._close(exc)
+    def message_received(self, message):
+        self.stream._push(message)
+
+class WPListenerProtocol(WPProtocol):
+    def __init__(self, conn_handler):
+        self.conn_handler = conn_handler
+    def handshake_failed(self, exc):
+        pass
+    def connection_made(self):
+        stream = WPStream(self)
+        self.stream = stream
+        self.conn_handler(stream)
+    def connection_lost(self, exc):
+        self.stream._close(exc)
+    def message_received(self, message):
+        self.stream._push(message)
+
+class WPStream:
+    def __init__(self, wpproto):
+        self.wpproto = wpproto
+        self.readbuffer = []
+        self.readfuture = []
+        self.readable = True
+        self.writable = True
+        self.exc = None
+    def _push(self, data):
+        if len(self.readfuture) > 0:
+            future = self.readfuture[0]
+            del self.readfuture[0]
+            future.set_result(data)
+        else:
+            self.readbuffer.append(data)
+            if len(self.readbuffer) >= READ_BUFFER_HIGH_WATER_MARK:
+                self.wpproto.pause()
+    def _close(self, exc):
+        self.readable = False
+        self.writable = False
+        self.exc = exc
+    def read(self):
+        result = asyncio.Future()
+        if len(self.readbuffer) > 0:
+            result.set_result(self.readbuffer[0])
+            del self.readbuffer[0]
+            if len(self.readbuffer) < READ_BUFFER_HIGH_WATER_MARK:
+                self.wpproto.resume()
+        else:
+            if self.readable:
+                self.readfuture.append(result)
+                self.wpproto.resume()
+            else:
+                result.set_exception(Exception('cannot read more data'))
+        return asyncio.ensure_future(result)
+    def close(self):
+        self.writable = False
+        self.wpproto.close()
+    def write(self, msg):
+        if not self.writable:
+            raise Exception('cannot write more data')
+        self.wpproto.send_message(msg)
+    def peer_key(self):
+        return self.wpproto.peer_key()
+    def can_read(self):
+        return readable
+    def can_write(self):
+        return writable
+    def get_exception(self):
+        return self.exc
+
+async def connect(addr):
+    loop = asyncio.get_event_loop()
+    stream_future = asyncio.Future()
+    await loop.create_connection(
+        lambda: TCPProtocol(lambda: WPStreamProtocol(stream_future)), addr[0], addr[1])
+    return await stream_future
+
+async def listen(addr, conn_handler):
+    loop = asyncio.get_event_loop()
+    server = await asyncio.create_server(
+        lambda: TCPProtocol(lambda: WPListenerProtocol(conn_handler), addr[0], addr[1]))
+    return server
