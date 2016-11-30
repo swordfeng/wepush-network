@@ -23,6 +23,7 @@ Assigned Cipher Types:
     0x81 AES-GCM (256)
     0x82 CHACHA20-POLY1305 (IETF)
 Now we only support ECDHE(curve25519)-EDDSA(ed25519)-CHACHA20-POLY1305(IETF), aka [0x02,0x43,0x82]
+Currently KDF is sha512, e.g. [server_send_key|client_send_key] = sha512(shared_secret)
 
 Communicate Protocol Design
 ===========================
@@ -121,11 +122,15 @@ heartbeat
     no params
     must be sent every 30 seconds by server
 
-A UDP-based stream protocol design
+Proposal for UDP-based stream protocol design
 ==================================
-Packet types, Flow Control and Congestion control is
-similar to uTP.
+Packet types, Flow Control and Congestion control is similar to uTP.
+Packet format is same as uTP with an extra extension.
 http://www.bittorrent.org/beps/bep_0029.html
-SYN-STATE-DATA handshake also includes Crypto Setup (as extension 0x80)
 Congestion Control:
     target offset = 25ms
+An extension (extension = 0x80): Crypto Setup
+    We include a security handshake buffer into extension field,
+    sent within SYN-STATE-DATA handshake process.
+    Buffers are padded to a multiple of 4 bytes (according to uTP specification).
+[We choose not implementing this now as the deadline is rather soon.]
