@@ -2,14 +2,15 @@ Security Protocol Design V1
 ========================
 Handshake Steps:
   1. client connect to server with accepted cipher type, device pkey, signature
-    version|accept_ciphers_len|accept_ciphers|device_key_type|device_key|signature_of_all
-  2. server reply with chosen cipher type, server pkey, g&G, g^a, signature
+    version|accept_ciphers_len|accept_ciphers|device_key_type|device_key|signature
+  2. server reply with chosen cipher type, server pkey, g^a, signature
     server_key_type|kex_type|AEAD_type|server_key|kex_aG|signature
   3. client send g^b
     key_bG|signature
   4. now communicates with AEAD and message format:
     length(4 bytes LE)|tag(size of tag)|nonce(size of nonce)|ciphertext(length bytes)
-Server and client now share the secret g^(ab), and derive enc_key, mac_key (if presend) from it
+Signatures are always signatures of the whole handshake message (except itself of course).
+Server and client now share the secret g^(ab), and derive enc_key, mac_key (if present) from it
 Accepted Cipher Suites:
     Kex: DHE(diffiehellman), ECDHE(pyelliptic for nist, pysodium for curve25519)
     Signature: RSA(rsa), ECDSA(ecpy), [EDDSA](ecpy or pysodium)
