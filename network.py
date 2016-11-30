@@ -27,67 +27,90 @@ class TCPProtocol(asyncio.Protocol):
         pass
     def data_received(self, data):
         self.buffer = self.buffer + data
-        if self.is_server:
-            if self.handshake == 0:
-                # parse client data
-                if len(self.buffer) < 6 + keys.PK_SIZE + keys.SIGN_SIZE: # TODO: check the content of the header, calculate the correct length
+        if self.handshake == 0:
+            # parse client data
+            if len(self.buffer) < 6 + keys.PK_SIZE + keys.SIGN_SIZE: # TODO: check the content of the header, calculate the correct length
+                return
+            device_key = self.buffer[6:6 + keys.PK_SIZE]
+            signature = self.buffer[6 + keys.PK_SIZE:6 + keys.PK_SIZE + keys.SIGN_SIZE]
+            handshake_buf = self.buffer[:6 + keys.PK_SIZE]
+            try:
+                crypto_sign_verify_detached(signature, handshake_buf, device_key)
+            except:
+                # error verify signature
+                self.transport.close()
+                return
+            #self.buffer = self.buffer[6 + keys.PK_SIZE + keys.SIGN_SIZE:]
+            self.buffer = b'' # should have no more data
+            kex_sk = randombytes(keys.KEX_SK_SIZE)
+            kex_pk = crypto_scalarmult_curve25519_base(key_sk)
+            server_buf = b'\x43\x02\x82' + keys.pk + kex_pk
+            server_sig = crypto_sign_detached(server_buf, keys.sk)
+            self.kex_sk = kex_sk
+            self.handshake = 2
+            self.device_key = device_key
+        elif self.handshake == 1:
+            # parse server data
+            if len(self.buffer) < 3+keys.PK_SIZE+keys.KEX_PK_SIZE+keys.SIGN_SIZE:
+                return
+            server_pk = self.buffer[3:3+keys.PK_SIZE]
+            kex_pk = self.buffer[3+keys.PK_SIZE:3+keys.PK_SIZE+keys.KEX_PK_SIZE]
+            server_sig = self.buffer[3+keys.PK_SIZE+keys.KEX_PK_SIZE:3+keys.PK_SIZE+keys.KEX_PK_SIZE+keys.SIGN_SIZE]
+            signed_buf = self.buffer[:3+keys.PK_SIZE+keys.KEX_PK_SIZE]
+            self.buffer = b'' # should have no more data
+            try:
+                crypto_sign_verify_detached(server_sig, signed_buf, server_pk)
+            except:
+                self.transport.close()
+                return
+            # then complete
+            kex_sk = randombytes(keys.KEX_SK_SIZE)
+            client_kex_pk = crypto_scalarmult_curve25519_base(kex_sk)
+            signature = crypto_sign_detached(client_kex_pk, keys.sk)
+            self.transport.write(client_kex_pk + signature)
+            shared_secret = crypto_scalarmult_curve25519(kex_sk, kex_pk)
+            key = crypto_sha256(shared_secret)
+            self.key = key
+            self.handshake = 3
+            # TODO: connected
+        elif self.handshake == 2:
+            # parse client data 2
+            if len(self.buffer) < keys.KEX_PK_SIZE + keys.SIGN_SIZE:
+                return
+            client_kex_pk = self.buffer[:keys.KEX_PK_SIZE]
+            signature = self.buffer[keys.KEX_PK_SIZE:keys.KEX_PK_SIZE+keys.SIGN_SIZE]
+            try:
+                crypto_sign_verify_detached(signature, client_kex_pk, self.device_key)
+            except:
+                # error verify signature
+                self.transport.close()
+                return
+            shared_secret = crypto_scalarmult_curve25519(self.kex_sk, client_kex_pk)
+            key = crypto_sha256(shared_secret)
+            del self.kex_sk
+            self.buffer = self.buffer[keys.KEX_PK_SIZE+keys.SIGN_SIZE:]
+            self.key = key
+            self.handshake = 3
+            # TODO: connected
+        else: # self.handshake == 3
+            # unpack data, and send to upper object
+            while len(self.buffer) >= 4 + keys.TAG_SIZE + keys.NONCE_SIZE:
+                length, = struct.unpack('<I', self.buffer[:4])
+                if len(self.buffer) < 4 + keys.TAG_SIZE + keys.NONCE_SIZE + length:
                     return
-                device_key = self.buffer[6:6 + keys.PK_SIZE]
-                signature = self.buffer[6 + keys.PK_SIZE:6 + keys.PK_SIZE + keys.SIGN_SIZE]
-                handshake_buf = self.buffer[:6 + keys.PK_SIZE]
+                tag = self.buffer[4:4+keys.TAG_SIZE]
+                nonce = self.buffer[4+keys.TAG_SIZE:4+keys.TAG_SIZE+keys.NONCE_SIZE]
+                ct = self.buffer[4+keys.TAG_SIZE+keys.NONCE_SIZE:4+keys.TAG_SIZE+keys.NONCE_SIZE+length]
+                self.buffer = self.buffer[4+keys.TAG_SIZE+keys.NONCE_SIZE+length:]
                 try:
-                    crypto_sign_verify_detached(signature, handshake_buf, device_key)
+                    # sodium combined mode concats mac after ciphertext
+                    msg = crypto_aead_chacha20poly1305_decrypt(ct + tag, None, nonce, self.key)
                 except:
-                    # error verify signature
+                    # fail to decrypt
                     self.transport.close()
                     return
-                #self.buffer = self.buffer[6 + keys.PK_SIZE + keys.SIGN_SIZE:]
-                self.buffer = b'' # should have no more data
-                kex_sk = randombytes(keys.KEX_SK_SIZE)
-                kex_pk = crypto_scalarmult_base(key_sk)
-                server_buf = b'\x43\x02\x82' + keys.pk + kex_pk
-                server_sig = crypto_sign_detached(server_buf, keys.sk)
-                self.kex_sk = kex_sk
-                self.handshake = 2
-            elif self.handshake == 2:
-                # parse client data 2
-                if len(self.buffer) < keys.KEX_PK_SIZE + keys.SIGN_SIZE:
-                    return
-                client_kex_pk = self.buffer[:keys.KEX_PK_SIZE]
-                signature = self.buffer[keys.KEX_PK_SIZE:keys.KEX_PK_SIZE+keys.SIGN_SIZE]
-                try:
-                    crypto_sign_verify_detached(signature, handshake_buf, device_key)
-                except:
-                    # error verify signature
-                    self.transport.close()
-                    return
-                shared_secret = crypto_scalarmult_curve25519_(self.kex_sk, client_kex_pk)
-                key = crypto_sha256(shared_secret)
-                del self.kex_sk
-                self.buffer = self.buffer[keys.KEX_PK_SIZE+keys.SIGN_SIZE:]
-                self.key = key
-                self.handshake = 3
-            else:
-                # unpack data, and send to upper object
-                while len(self.buffer) >= 4 + keys.TAG_SIZE + keys.NONCE_SIZE:
-                    length, = struct.unpack('<I', self.buffer[:4])
-                    if len(self.buffer) < 4 + keys.TAG_SIZE + keys.NONCE_SIZE + length:
-                        return
-                    tag = self.buffer[4:4+keys.TAG_SIZE]
-                    nonce = self.buffer[4+keys.TAG_SIZE:4+keys.TAG_SIZE+keys.NONCE_SIZE]
-                    msg = self.buffer[4+keys.TAG_SIZE+keys.NONCE_SIZE:4+keys.TAG_SIZE+keys.NONCE_SIZE+length]
-                    self.buffer = self.buffer[4+keys.TAG_SIZE+keys.NONCE_SIZE+length:]
-                    try:
-                        crypto_aead_chacha20poly1305_decrypt_detached()
-        else:
-            if self.handshake == 1:
-                # parse server data
-                # or store data
-                # then complete
-                pass
-            else:
-                # unpack data, and send to upper object
-                pass
+                # TODO: handle message
+
     def eof_received(self):
         pass
     def write(data):
