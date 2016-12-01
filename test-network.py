@@ -12,8 +12,11 @@ async def conn_handler(stream):
         try:
             message = await stream.read()
             print('server recv message', message)
-            stream.write(message)
-        except:
+            stream.write(message[2:4])
+        except NetworkClosedException:
+            break
+        except Exception as e:
+            print('Exception:', e)
             stream.close()
             break
 

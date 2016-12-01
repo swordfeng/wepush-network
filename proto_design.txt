@@ -1,15 +1,15 @@
 Security Protocol Design V1
 ========================
 Handshake Steps:
-  1. client connect to server with accepted cipher type, device pkey, signature
-    version|accept_ciphers_len|accept_ciphers|device_key_type|device_key|signature
-  2. server reply with chosen cipher type, server pkey, g^a, signature
-    server_key_type|kex_type|AEAD_type|server_key|kex_aG|signature
-  3. client send g^b
+  1. client connect to server with accepted cipher type, device pkey, random challenge(32 bytes now), signature
+        version|accept_ciphers_len|accept_ciphers|device_key_type|device_key|client_challenge|signature
+  2. server reply with chosen cipher type, server pkey, g^a, random challenge, signature(buffer|client_challenge)
+        server_key_type|kex_type|AEAD_type|server_key|kex_aG|server_challenge|signature
+  3. client send g^b, signature(bG|server_challenge)
     key_bG|signature
   4. now communicates with AEAD and message format:
     length(4 bytes LE)|tag(size of tag)|nonce(size of nonce)|ciphertext(length bytes)
-Signatures are always signatures of the whole handshake message (except itself of course).
+Signatures are always signatures of the whole handshake message (except itself of course) and challenge.
 Server and client now share the secret g^(ab), and derive enc_key, mac_key (if present) from it
 Accepted Cipher Suites:
     Kex: DHE(diffiehellman), ECDHE(pyelliptic for nist, pysodium for curve25519)
@@ -23,6 +23,7 @@ Assigned Cipher Types:
     0x43 EDDSA (ed25519)
     0x81 AES-GCM (256)
     0x82 CHACHA20-POLY1305 (IETF)
+    0xFF Reject Ciphers
 Now we only support ECDHE(curve25519)-EDDSA(ed25519)-CHACHA20-POLY1305(IETF), aka [0x02,0x43,0x82]
 Currently KDF is sha512, e.g. [server_send_key|client_send_key] = sha512(shared_secret)
 

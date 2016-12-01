@@ -24,10 +24,12 @@ class TCPProtocol(asyncio.Protocol):
             self.handshake = 0
         else:
             # client launch handshake
-            handshake_buf = b'\x01\x03\x02\x43\x82\x43' + keys.pk
+            challenge = randombytes(32)
+            handshake_buf = b'\x01\x03\x02\x43\x82\x43' + keys.pk + challenge
             signature = crypto_sign_detached(handshake_buf, keys.sk)
             self.transport.write(handshake_buf + signature)
             self.handshake = 1
+            self.challenge = challenge
         self.wpproto._set_proto(self)
     def connection_lost(self, exc):
         if exc == None:
@@ -43,23 +45,26 @@ class TCPProtocol(asyncio.Protocol):
             if len(self.buffer) < 6 + keys.PK_SIZE + keys.SIGN_SIZE: # TODO: check the content of the header, calculate the correct length
                 return
             device_key = self.buffer[6:6 + keys.PK_SIZE]
-            signature = self.buffer[6 + keys.PK_SIZE:6 + keys.PK_SIZE + keys.SIGN_SIZE]
-            handshake_buf = self.buffer[:6 + keys.PK_SIZE]
+            client_challenge = self.buffer[6 + keys.PK_SIZE:6 + keys.PK_SIZE + 32]
+            signature = self.buffer[6 + keys.PK_SIZE + 32:6 + keys.PK_SIZE + 32 + keys.SIGN_SIZE]
+            handshake_buf = self.buffer[:6 + keys.PK_SIZE + 32]
             try:
                 crypto_sign_verify_detached(signature, handshake_buf, device_key)
             except:
                 # error verify signature
-                self.close_exc = Exception('Invalid signature')
+                self.close_exc = NetworkCryptoException('Invalid signature')
                 self.transport.close()
                 return
             #self.buffer = self.buffer[6 + keys.PK_SIZE + keys.SIGN_SIZE:]
             self.buffer = b'' # should have no more data
             kex_sk = randombytes(keys.KEX_SK_SIZE)
             kex_pk = crypto_scalarmult_curve25519_base(kex_sk)
-            server_buf = b'\x43\x02\x82' + keys.pk + kex_pk
-            server_sig = crypto_sign_detached(server_buf, keys.sk)
+            challenge = randombytes(32)
+            server_buf = b'\x43\x02\x82' + keys.pk + kex_pk + challenge
+            server_sig = crypto_sign_detached(server_buf + client_challenge, keys.sk)
             self.transport.write(server_buf + server_sig)
             self.kex_sk = kex_sk
+            self.challenge = challenge
             self.handshake = 2
             self._peer_key = device_key
         elif self.handshake == 1:
@@ -68,22 +73,24 @@ class TCPProtocol(asyncio.Protocol):
                 return
             server_pk = self.buffer[3:3+keys.PK_SIZE]
             kex_pk = self.buffer[3+keys.PK_SIZE:3+keys.PK_SIZE+keys.KEX_PK_SIZE]
-            server_sig = self.buffer[3+keys.PK_SIZE+keys.KEX_PK_SIZE:3+keys.PK_SIZE+keys.KEX_PK_SIZE+keys.SIGN_SIZE]
-            signed_buf = self.buffer[:3+keys.PK_SIZE+keys.KEX_PK_SIZE]
+            server_challenge = self.buffer[3+keys.PK_SIZE+keys.KEX_PK_SIZE:3+keys.PK_SIZE+keys.KEX_PK_SIZE+32]
+            server_sig = self.buffer[3+keys.PK_SIZE+keys.KEX_PK_SIZE+32:3+keys.PK_SIZE+keys.KEX_PK_SIZE+32+keys.SIGN_SIZE]
+            signed_buf = self.buffer[:3+keys.PK_SIZE+keys.KEX_PK_SIZE+32]
             self.buffer = b'' # should have no more data
             try:
-                crypto_sign_verify_detached(server_sig, signed_buf, server_pk)
+                crypto_sign_verify_detached(server_sig, signed_buf + self.challenge, server_pk)
             except:
-                self.close_exc = Exception('Invalid signature')
+                self.close_exc = NetworkCryptoException('Invalid signature')
                 self.transport.close()
                 return
             # then complete
             kex_sk = randombytes(keys.KEX_SK_SIZE)
             client_kex_pk = crypto_scalarmult_curve25519_base(kex_sk)
-            signature = crypto_sign_detached(client_kex_pk, keys.sk)
+            signature = crypto_sign_detached(client_kex_pk + server_challenge, keys.sk)
             self.transport.write(client_kex_pk + signature)
             shared_secret = crypto_scalarmult_curve25519(kex_sk, kex_pk)
             key = crypto_hash_sha512(shared_secret)
+            del self.challenge
             self.recv_key = key[:32]
             self.send_key = key[32:]
             self.handshake = 3
@@ -97,15 +104,16 @@ class TCPProtocol(asyncio.Protocol):
             client_kex_pk = self.buffer[:keys.KEX_PK_SIZE]
             signature = self.buffer[keys.KEX_PK_SIZE:keys.KEX_PK_SIZE+keys.SIGN_SIZE]
             try:
-                crypto_sign_verify_detached(signature, client_kex_pk, self._peer_key)
+                crypto_sign_verify_detached(signature, client_kex_pk + self.challenge, self._peer_key)
             except:
                 # error verify signature
-                self.close_exc = Exception('Invalid signature')
+                self.close_exc = NetworkCryptoException('Invalid signature')
                 self.transport.close()
                 return
             shared_secret = crypto_scalarmult_curve25519(self.kex_sk, client_kex_pk)
             key = crypto_hash_sha512(shared_secret)
             del self.kex_sk
+            del self.challenge
             self.buffer = self.buffer[keys.KEX_PK_SIZE+keys.SIGN_SIZE:]
             self.send_key = key[:32]
             self.recv_key = key[32:]
@@ -128,14 +136,14 @@ class TCPProtocol(asyncio.Protocol):
                     msg = crypto_aead_chacha20poly1305_ietf_decrypt(ct + tag, b'', nonce, self.recv_key)
                 except:
                     # fail to decrypt
-                    self.close_exc = Exception('Invalid MAC')
+                    self.close_exc = NetworkCryptoException('Invalid MAC')
                     self.transport.close()
                     return
                 # handle message
                 self.wpproto.message_received(msg)
     def write(self, data):
         if self.handshake != 3:
-            raise Exception('handshake not completed')
+            raise NetworkStateException('handshake not completed')
         # pack data with AEAD, write data
         length = len(data)
         nonce = randombytes(keys.NONCE_SIZE)
@@ -230,8 +238,8 @@ class WPStream:
         self.readable = False
         self.writable = False
         self.exc = exc
-        for future in len(self.readfuture):
-            future.set_exception(exc)
+        for future in self.readfuture:
+            future.set_exception(NetworkClosedException() if exc == None else exc)
     def read(self):
         result = asyncio.Future()
         if len(self.readbuffer) > 0:
@@ -244,14 +252,14 @@ class WPStream:
                 self.readfuture.append(result)
                 self.wpproto.resume()
             else:
-                result.set_exception(Exception('cannot read more data'))
+                result.set_exception(NetworkClosedException())
         return asyncio.ensure_future(result)
     def close(self):
         self.writable = False
         self.wpproto.close()
     def write(self, msg):
         if not self.writable:
-            raise Exception('cannot write more data')
+            raise NetworkClosedException()
         self.wpproto.send_message(msg)
     def peer_key(self):
         return self.wpproto.peer_key()
@@ -261,6 +269,22 @@ class WPStream:
         return writable
     def get_exception(self):
         return self.exc
+
+class NetworkException(Exception):
+    def __init__(self, *args, **kw):
+        super(*args, **kw)
+
+class NetworkCryptoException(NetworkException):
+    def __init__(self, *args, **kw):
+        super(*args, **kw)
+
+class NetworkClosedException(NetworkException):
+    def __init__(self, *args, **kw):
+        super(*args, **kw)
+
+class NetworkStateException(NetworkException):
+    def __init__(self, *args, **kw):
+        super(*args, **kw)
 
 async def connect(addr):
     loop = asyncio.get_event_loop()
