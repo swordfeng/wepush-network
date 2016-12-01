@@ -125,14 +125,14 @@ class TCPProtocol(asyncio.Protocol):
         # may have remain data after handshake
         if self.handshake == 3:
             # unpack data, and send to upper object
-            while len(self.buffer) >= 4 + keys.TAG_SIZE:
-                length, = struct.unpack('<I', self.buffer[:4])
-                if len(self.buffer) < 4 + keys.TAG_SIZE + length:
+            while len(self.buffer) >= 2 + keys.TAG_SIZE:
+                length, = struct.unpack('<H', self.buffer[:2])
+                if len(self.buffer) < 2 + keys.TAG_SIZE + length:
                     return
-                tag = self.buffer[4:4+keys.TAG_SIZE]
+                tag = self.buffer[2:2+keys.TAG_SIZE]
                 nonce = self.recv_nonce.get()
-                ct = self.buffer[4+keys.TAG_SIZE:4+keys.TAG_SIZE+length]
-                self.buffer = self.buffer[4+keys.TAG_SIZE+length:]
+                ct = self.buffer[2+keys.TAG_SIZE:2+keys.TAG_SIZE+length]
+                self.buffer = self.buffer[2+keys.TAG_SIZE+length:]
                 try:
                     # sodium combined mode concats mac after ciphertext
                     msg = crypto_aead_chacha20poly1305_ietf_decrypt(ct + tag, b'', nonce, self.recv_key)
@@ -148,6 +148,7 @@ class TCPProtocol(asyncio.Protocol):
     def resume_writing():
         self.wpproto.resume_writing()
     def write(self, data):
+        assert len(data) < 0x10000
         if self.handshake != 3:
             raise NetworkStateException('handshake not completed')
         # pack data with AEAD, write data
@@ -155,7 +156,7 @@ class TCPProtocol(asyncio.Protocol):
         nonce = self.send_nonce.get()
         encrypted = crypto_aead_chacha20poly1305_ietf_encrypt(data, b'', nonce, self.send_key)
         ct, tag = encrypted[:length], encrypted[length:]
-        lenbuf = struct.pack('<I', length)
+        lenbuf = struct.pack('<H', length)
         self.transport.write(lenbuf + tag + ct)
     def close(self):
         self.transport.close()

@@ -8,7 +8,7 @@ Handshake Steps:
   3. client send g^b, signature(bG|server_challenge)
         key_bG|signature
   4. now communicates with AEAD and message format:
-        length(4 bytes LE)|tag(size of tag)|ciphertext(length bytes)
+        length(2 bytes LE)|tag(size of tag)|ciphertext(length bytes)
      nonce is counted from 0 and increased 1 for each message sent, LE
 Signatures are always signatures of the whole handshake message (except itself of course) and challenge.
 Server and client now share the secret g^(ab), and derive enc_key, mac_key (if present) from it

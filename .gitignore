@@ -4,3 +4,4 @@ lib
 pip-selfcheck.json
 __pycache__
 keys.json
+*.tmp
