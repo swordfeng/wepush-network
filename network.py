@@ -230,6 +230,8 @@ class WPStream:
         self.readable = False
         self.writable = False
         self.exc = exc
+        for future in len(self.readfuture):
+            future.set_exception(exc)
     def read(self):
         result = asyncio.Future()
         if len(self.readbuffer) > 0:
