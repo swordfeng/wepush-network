@@ -16,6 +16,8 @@ class TCPProtocol(asyncio.Protocol):
         self.is_server = is_server
         self.wpproto = wpproto_factory()
         self.close_exc = None
+        self.send_nonce = Nonce(keys.NONCE_SIZE)
+        self.recv_nonce = Nonce(keys.NONCE_SIZE)
     def connection_made(self, transport):
         self.transport = transport
         self._paused = False
@@ -123,14 +125,14 @@ class TCPProtocol(asyncio.Protocol):
         # may have remain data after handshake
         if self.handshake == 3:
             # unpack data, and send to upper object
-            while len(self.buffer) >= 4 + keys.TAG_SIZE + keys.NONCE_SIZE:
+            while len(self.buffer) >= 4 + keys.TAG_SIZE:
                 length, = struct.unpack('<I', self.buffer[:4])
-                if len(self.buffer) < 4 + keys.TAG_SIZE + keys.NONCE_SIZE + length:
+                if len(self.buffer) < 4 + keys.TAG_SIZE + length:
                     return
                 tag = self.buffer[4:4+keys.TAG_SIZE]
-                nonce = self.buffer[4+keys.TAG_SIZE:4+keys.TAG_SIZE+keys.NONCE_SIZE]
-                ct = self.buffer[4+keys.TAG_SIZE+keys.NONCE_SIZE:4+keys.TAG_SIZE+keys.NONCE_SIZE+length]
-                self.buffer = self.buffer[4+keys.TAG_SIZE+keys.NONCE_SIZE+length:]
+                nonce = self.recv_nonce.get()
+                ct = self.buffer[4+keys.TAG_SIZE:4+keys.TAG_SIZE+length]
+                self.buffer = self.buffer[4+keys.TAG_SIZE+length:]
                 try:
                     # sodium combined mode concats mac after ciphertext
                     msg = crypto_aead_chacha20poly1305_ietf_decrypt(ct + tag, b'', nonce, self.recv_key)
@@ -150,11 +152,11 @@ class TCPProtocol(asyncio.Protocol):
             raise NetworkStateException('handshake not completed')
         # pack data with AEAD, write data
         length = len(data)
-        nonce = randombytes(keys.NONCE_SIZE)
+        nonce = self.send_nonce.get()
         encrypted = crypto_aead_chacha20poly1305_ietf_encrypt(data, b'', nonce, self.send_key)
         ct, tag = encrypted[:length], encrypted[length:]
         lenbuf = struct.pack('<I', length)
-        self.transport.write(lenbuf + tag + nonce + ct)
+        self.transport.write(lenbuf + tag + ct)
     def close(self):
         self.transport.close()
     def peer_key(self):
@@ -297,20 +299,13 @@ class WPStream:
         return self.exc
 
 class NetworkException(Exception):
-    def __init__(self, *args, **kw):
-        super(*args, **kw)
-
+    pass
 class NetworkCryptoException(NetworkException):
-    def __init__(self, *args, **kw):
-        super(*args, **kw)
-
+    pass
 class NetworkClosedException(NetworkException):
-    def __init__(self, *args, **kw):
-        super(*args, **kw)
-
+    pass
 class NetworkStateException(NetworkException):
-    def __init__(self, *args, **kw):
-        super(*args, **kw)
+    pass
 
 async def connect(addr):
     loop = asyncio.get_event_loop()

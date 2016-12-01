@@ -6,9 +6,10 @@ Handshake Steps:
   2. server reply with chosen cipher type, server pkey, g^a, random challenge, signature(buffer|client_challenge)
         server_key_type|kex_type|AEAD_type|server_key|kex_aG|server_challenge|signature
   3. client send g^b, signature(bG|server_challenge)
-    key_bG|signature
+        key_bG|signature
   4. now communicates with AEAD and message format:
-    length(4 bytes LE)|tag(size of tag)|nonce(size of nonce)|ciphertext(length bytes)
+        length(4 bytes LE)|tag(size of tag)|ciphertext(length bytes)
+     nonce is counted from 0 and increased 1 for each message sent, LE
 Signatures are always signatures of the whole handshake message (except itself of course) and challenge.
 Server and client now share the secret g^(ab), and derive enc_key, mac_key (if present) from it
 Accepted Cipher Suites:
