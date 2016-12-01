@@ -141,6 +141,10 @@ class TCPProtocol(asyncio.Protocol):
                     return
                 # handle message
                 self.wpproto.message_received(msg)
+    def pause_writing():
+        self.wpproto.pause_writing()
+    def resume_writing():
+        self.wpproto.resume_writing()
     def write(self, data):
         if self.handshake != 3:
             raise NetworkStateException('handshake not completed')
@@ -179,6 +183,26 @@ class WPProtocol:
         self.tcpproto.pause()
     def resume(self):
         self.tcpproto.resume()
+    def drain(self):
+        result = asyncio.Future()
+        if not hasattr(self, '_drained'):
+            self._drained = True
+        if self._drained:
+            result.set_result(None)
+        else:
+            if not hasattr(self, '_drainfuture'):
+                self._drainfuture = []
+            self._drainfuture.append(result)
+        return result
+    # default implemented flow control
+    def pause_writing(self):
+        self._drained = False
+    def resume_writing(self):
+        self._drained = True
+        if hasattr(self, '_drainfuture'):
+            for f in self._drainfuture:
+                f.set_result(None)
+        self._drainfuture = []
     # overriden functions
     def handshake_failed(self, exc):
         pass
@@ -261,6 +285,8 @@ class WPStream:
         if not self.writable:
             raise NetworkClosedException()
         self.wpproto.send_message(msg)
+    async def drain(self):
+        await self.wpproto.drain()
     def peer_key(self):
         return self.wpproto.peer_key()
     def can_read(self):
