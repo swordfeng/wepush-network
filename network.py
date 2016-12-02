@@ -4,6 +4,7 @@ import asyncio
 from crypto import *
 import keys
 import struct
+from base64 import b64encode
 
 READ_BUFFER_HIGH_WATER_MARK = 16
 
@@ -295,7 +296,7 @@ class WPStream:
     async def drain(self):
         await self.wpproto.drain()
     def peer_key(self):
-        return self.wpproto.peer_key()
+        return b64encode(self.wpproto.peer_key())
     def peer_addr(self):
         return self.wpproto.peer_addr()
     def can_read(self):
