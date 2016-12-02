@@ -2,6 +2,7 @@
 
 import asyncio
 import aiofiles
+import random
 from network import *
 from netutil import *
 import db
@@ -82,7 +83,7 @@ async def handle_push_file(stream, request):
     else:
         # we need fetch
         try:
-            await do_fetch_file(stream, fileinfo)
+            await do_fetch_file(stream, fileinfo, path)
             await finish_send_file(fileinfo)
             sendjson(stream, {'success': True})
         except NetworkClosedException:
@@ -131,8 +132,46 @@ async def device_push_messages_async(devicekey):
 def device_push_messages(devicekey):
     asyncio.ensure_future(device_push_messages_async(devicekey))
 
-def do_fetch_file(stream, fileinfo):
+async def do_fetch_file(stream, fileinfo, path):
+    startpos = fileinfo['completed_size']
+    length = fileinfo['length']
+    size = length - startpos
+    if size > 0:
+        sendjson(stream, {
+            'success': True,
+            'get_range': [startpos, length]
+        })
+        recv_size = await recvfile(stream, path, startpos, size)
+        startpos += recv_size
+    if startpos < length:
+        await db.set_fetching_completed(fileinfo['fromdevice'], fileinfo['digest'], startpos)
+    else:
+        if not await fm.file_verify_digest(fileinfo['fromdevice'], fileinfo['digest']):
+            # cancel fetch
+
+async def try_restart_file_async(fileinfo):
+    devicekey = fileinfo['fromdevice']
+    if devicekey not in listeners:
+        return
+    if len(listeners[devicekey]) == 0:
+        return
+    stream = random.choice(listeners[devicekey])
+    sendjson(stream, {
+        'message': 'restart_file',
+        'digest': fileinfo['digest']
+    })
+    result = await readjson(stream)
+    if not result['success']:
+        print('restart sending error:', result['error'])
+        await db.cancel_fetch(fileinfo['fromdevice'], fileinfo['digest'])
+
 def try_restart_file(fileinfo):
+    asyncio.ensure_future(try_restart_file_async(fileinfo))
+
+async def handle_get_file(stream, request):
+    path = await fm.file_path(request['from'], request['digest'])
+    [start, end] = request['get_range']
+    await sendfile(strea, path, start, end - start)
 
 server = loop.run_until_complete(listen(('0.0.0.0', 12345), lambda stream: asyncio.ensure_future(on_connection(stream))))
 print('Server listening on 0.0.0.0:12345')

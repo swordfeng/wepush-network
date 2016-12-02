@@ -5,6 +5,7 @@ import aiofiles
 import json
 
 async def sendfile(stream, fname, pos, size):
+    len_write = 0
     async with aiofiles.open(fname, 'rb') as f:
         await f.seek(pos)
         while size > 0:
@@ -12,21 +13,31 @@ async def sendfile(stream, fname, pos, size):
             buf = await f.read(buf_size)
             if len(buf) != buf_size:
                 raise Exception('file size mismatch!')
-            stream.write(buf)
+            try:
+                stream.write(buf)
+            except Exception as e:
+                print('stream write interrupt:', e)
+                return len_write
             size -= buf_size
+            len_write += buf_size
             await stream.drain()
 
 async def recvfile(stream, fname, pos, size):
+    len_read = 0
     async with aiofiles.open(fname, 'wb') as f:
         await f.seek(pos)
         while size > 0:
-            buf = await stream.read()
+            try:
+                buf = await stream.read()
+            except Exception as e:
+                print('stream read interrupt:', e)
+                return len_read
             buf_len = len(buf)
             await f.write(buf)
-            print(buf_len, 'written')
+            len_read += buf_len
             size -= buf_len
-            print(size, 'remain')
             assert size >= 0
+    return len_read
 
 def sendjson(stream, obj):
     buf = json.dumps(obj).encode()
