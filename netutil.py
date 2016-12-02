@@ -32,6 +32,6 @@ def sendjson(stream, obj):
     buf = json.dumps(obj).encode()
     stream.write(buf)
 
-async def readjson(stream, obj):
-    buf = json.dumps(obj).encode()
-    stream.write(buf)
+async def readjson(stream):
+    buf = await stream.read()
+    return json.loads(buf.decode())
