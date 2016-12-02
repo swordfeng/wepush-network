@@ -13,7 +13,8 @@ loop = asyncio.get_event_loop()
 handlers = {
     'listen': handle_listen,
     'push': handle_push,
-    'push_file': handle_push_file
+    'push_file': handle_push_file,
+    'get_file': handle_get_file
 }
 
 async def on_connection(stream):
@@ -70,29 +71,47 @@ async def handle_push(stream, request):
 async def handle_push_file(stream, request):
     devicekey = stream.peer_key()
     # add file to fetching_files if not added and (file not exist or digest mismatch)
-    fileinfo = None
-    path = await file_path(devicekey, request['digest'])
-    if path == None:
+    fileinfo = await db.get_fetching(devicekey, request['digest'])
+    if (await fm.file_exist(devicekey, request['digest'])) and fileinfo == None:
+        # file already fetched
+        fileinfo = request
+        fileinfo['fromdevice'] = devicekey
+    else:
+        # may update targets
         fileinfo = await db.add_fetching(devicekey, request['target'], request['digest'], request['length'])
         path = await fm.file_create(devicekey, request['digest'])
-    if fileinfo == None:
-        # fetch is already finished
-        request['fromdevice'] = devicekey
-        await finish_send_file(request)
-        sendjson(stream, {'success': True})
-    else:
-        # we need fetch
         try:
-            await do_fetch_file(stream, fileinfo, path)
-            await finish_send_file(fileinfo)
-            sendjson(stream, {'success': True})
-        except NetworkClosedException:
+            startpos = fileinfo['completed_size']
+            length = fileinfo['length']
+            size = length - startpos
+            if size > 0:
+                sendjson(stream, {
+                    'success': True,
+                    'get_range': [startpos, length]
+                })
+                recv_size = await recvfile(stream, path, startpos, size)
+                startpos += recv_size
+            if startpos < length:
+                await db.set_fetching_completed(fileinfo['fromdevice'], fileinfo['digest'], startpos)
+            else:
+                if not await fm.file_verify_digest(fileinfo['fromdevice'], fileinfo['digest']):
+                    # cancel fetch
+                    await db.cancel_fetch(devicekey, fileinfo['digest'])
+                    raise Exception('file digest mismatch')
+        except Exception as e:
+            print('error when fetching file:', e)
             try_restart_file(fileinfo)
-
-async def finish_send_file(fileinfo):
+            sendjson(stream, {'success': False, 'error': 'fail to fetch'})
+            return
+    sendjson(stream, {'success': True})
     for devicekey in fileinfo['target']:
         await db.push_file(devicekey, fileinfo['fromdevice'], fileinfo['content_type'], fileinfo['digest'])
         device_push_messages(devicekey)
+
+async def handle_get_file(stream, request):
+    path = await fm.file_path(request['from'], request['digest'])
+    [start, end] = request['get_range']
+    await sendfile(strea, path, start, end - start)
 
 pushing_messages = set()
 async def device_push_messages_async(devicekey):
@@ -132,23 +151,6 @@ async def device_push_messages_async(devicekey):
 def device_push_messages(devicekey):
     asyncio.ensure_future(device_push_messages_async(devicekey))
 
-async def do_fetch_file(stream, fileinfo, path):
-    startpos = fileinfo['completed_size']
-    length = fileinfo['length']
-    size = length - startpos
-    if size > 0:
-        sendjson(stream, {
-            'success': True,
-            'get_range': [startpos, length]
-        })
-        recv_size = await recvfile(stream, path, startpos, size)
-        startpos += recv_size
-    if startpos < length:
-        await db.set_fetching_completed(fileinfo['fromdevice'], fileinfo['digest'], startpos)
-    else:
-        if not await fm.file_verify_digest(fileinfo['fromdevice'], fileinfo['digest']):
-            # cancel fetch
-
 async def try_restart_file_async(fileinfo):
     devicekey = fileinfo['fromdevice']
     if devicekey not in listeners:
@@ -167,11 +169,6 @@ async def try_restart_file_async(fileinfo):
 
 def try_restart_file(fileinfo):
     asyncio.ensure_future(try_restart_file_async(fileinfo))
-
-async def handle_get_file(stream, request):
-    path = await fm.file_path(request['from'], request['digest'])
-    [start, end] = request['get_range']
-    await sendfile(strea, path, start, end - start)
 
 server = loop.run_until_complete(listen(('0.0.0.0', 12345), lambda stream: asyncio.ensure_future(on_connection(stream))))
 print('Server listening on 0.0.0.0:12345')
