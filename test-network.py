@@ -8,7 +8,7 @@ loop = asyncio.get_event_loop()
 server = None
 
 async def conn_handler(stream):
-    print('new stream')
+    print('new stream from', stream.peer_addr())
     while True:
         try:
             message = await stream.read()

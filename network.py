@@ -170,6 +170,8 @@ class TCPProtocol(asyncio.Protocol):
         if self._paused:
             self.transport.resume_reading()
             self._paused = False
+    def peer_addr(self):
+        return self.transport.get_extra_info('peername')
 
 class WPProtocol:
     # internal functions
@@ -180,6 +182,8 @@ class WPProtocol:
         self.tcpproto.write(message)
     def peer_key(self):
         return self.tcpproto.peer_key()
+    def peer_addr(self):
+        return self.tcpproto.peer_addr()
     def close(self):
         self.tcpproto.close()
     def pause(self):
@@ -292,6 +296,8 @@ class WPStream:
         await self.wpproto.drain()
     def peer_key(self):
         return self.wpproto.peer_key()
+    def peer_addr(self):
+        return self.wpproto.peer_addr()
     def can_read(self):
         return readable
     def can_write(self):
