@@ -54,44 +54,45 @@ listen
 push
     push a notification
     params:
-        content_type: mime type?
-        content: content of notification
-        target: all devices or specific device?
+        content_type: mime type? <string>
+        content: content of notification <string>
+        target: all devices or specific device? <[string...]>
 push_clipboard
     push content of clipboard
     params: (same as push?)
 push_file
     push a file
     params:
-        content_type: mime type?
-        target: all devices or specific device?
-        filename: filename
-        length: file length
-        digest: hashsum of file
+        content_type: mime type? <string>
+        target: all devices or specific device? <[string...]>
+        filename: filename <string>
+        length: file length <int>
+        digest: hashsum of file <string>
     response:
-        get_range: a range in the file
+        get_range: a range in the file <[int, int]>
     the client enter File Mode after a response with a get_range
     the response may repeat several times until file is complete
     until server respond without "get_range" in fields
 get_file
     get a file pushed to this device
     params:
-        digest: hashsum
-        get_range: a range in the file
+        from: device <string>
+        digest: hashsum <string>
+        get_range: a range in the file <[int, int]>
     server first send a response and, if success, enter File Mode
     and send the file
 status
     get register status from server
     no params
     response:
-        registered: true|false
-        user: username (if registered)
+        registered: true|false <boolean>
+        user: username (if registered) <string>
         (and other info...)
 register_device
     register this device as a specific user
     params:
-        user: username
-        password: password
+        user: username <string>
+        password: password <string>
     (server retrieve device pkey from connection info)
 register_user
     register a new user
@@ -102,31 +103,31 @@ Server Messages
 push
     push a notification
     params:
-        content_type: mime type
-        content: content
+        content_type: mime type <string>
+        content: content <string>
 push_clipboard
     push clipboard content
     params: same as push
 push_file
     notify the client that a file is pushed
     params:
-        content_type: mime
-        filename: filename
-        length: file length
-        digest: hash
+        content_type: mime <string>
+        filename: filename <string>
+        length: file length <int>
+        digest: hash <string>
     client invoke get_file request after this message
 restart_file
     make a client retransmit a file
     params:
-        digest: hash
-    client invoke push_file request after this message
+        digest: hash <string>
+    client invoke push_file request with empty target after this message
 heartbeat
     keep connection alive
     no params
     must be sent every 30 seconds by server
 
 Proposal for UDP-based stream protocol design
-==================================
+=============================================
 Packet types, Flow Control and Congestion control is similar to uTP.
 Packet format is same as uTP with an extra extension.
 http://www.bittorrent.org/beps/bep_0029.html
