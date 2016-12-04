@@ -78,7 +78,7 @@ async def handle_push_file(stream, request):
         fileinfo['fromdevice'] = devicekey
     else:
         # may update targets
-        fileinfo = await db.add_fetching(devicekey, request['target'], request['digest'], request['length'])
+        fileinfo = await db.add_fetching(devicekey, request['target'], request['filename'], request['digest'], request['length'])
         path = await fm.file_create(devicekey, request['digest'], request['length'])
         try:
             startpos = fileinfo['completed_size']
