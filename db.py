@@ -20,3 +20,18 @@ async def init():
         CREATE TABLE fetching_targets IF NOT EXIST (fromdevice TEXT, digest TEXT, target TEXT);
         CREATE INDEX IF NOT EXIST fetching_targets_index ON messages (fromdevice, digest);
         ''')
+
+def __init__():
+    loop.run_until_complete(init())
+
+async def push_message(target, fromdevice, content_type, content):
+async def push_file(target, fromdevice, content_type, digest, length):
+
+async def get_device_fetching(devicekey):
+async def get_fetching(devicekey, digest):
+async def add_fetching(devicekey, targets, digest, length):
+async def set_fetching_completed(devicekey, digest, pos):
+async def cancel_fetching(devicekey, digest):
+
+async def get_unpushed_messages(devicekey):
+async def set_message_pushed(mid):

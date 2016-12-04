@@ -42,7 +42,7 @@ async def handle_listen(stream, request):
     # push unpushed messages
     device_push_messages(devicekey)
     # restart unfetched files
-    for fileinfo in await db.get_device_fetchlist(devicekey):
+    for fileinfo in await db.get_device_fetching(devicekey):
         try_restart_file(fileinfo)
     return True
 
@@ -97,7 +97,7 @@ async def handle_push_file(stream, request):
                 if not await fm.file_verify_digest(fileinfo['fromdevice'], fileinfo['digest']):
                     # cancel fetch
                     fm.file_remove(devicekey, fileinfo['digest'])
-                    await db.cancel_fetch(devicekey, fileinfo['digest'])
+                    await db.cancel_fetching(devicekey, fileinfo['digest'])
                     raise Exception('file digest mismatch')
         except Exception as e:
             print('error when fetching file:', e)
@@ -106,7 +106,7 @@ async def handle_push_file(stream, request):
             return
     sendjson(stream, {'success': True})
     for devicekey in fileinfo['target']:
-        await db.push_file(devicekey, fileinfo['fromdevice'], fileinfo['content_type'], fileinfo['digest'])
+        await db.push_file(devicekey, fileinfo['fromdevice'], fileinfo['content_type'], fileinfo['digest'], fileinfo['length'])
         device_push_messages(devicekey)
 
 async def handle_get_file(stream, request):
@@ -149,7 +149,7 @@ async def device_push_messages_async(devicekey):
                 })
             result = await readjson(stream)
             if result['success']:
-                await db.message_pushed(message.mid)
+                await db.set_message_pushed(message.mid)
         except Exception as e:
             print(e)
             # ??
@@ -172,7 +172,7 @@ async def try_restart_file_async(fileinfo):
     result = await readjson(stream)
     if not result['success']:
         print('restart sending error:', result['error'])
-        await db.cancel_fetch(fileinfo['fromdevice'], fileinfo['digest'])
+        await db.cancel_fetching(fileinfo['fromdevice'], fileinfo['digest'])
 
 def try_restart_file(fileinfo):
     asyncio.ensure_future(try_restart_file_async(fileinfo))
