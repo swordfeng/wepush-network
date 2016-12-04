@@ -72,14 +72,14 @@ async def handle_push_file(stream, request):
     devicekey = stream.peer_key()
     # add file to fetching_files if not added and (file not exist or digest mismatch)
     fileinfo = await db.get_fetching(devicekey, request['digest'])
-    if (await fm.file_exist(devicekey, request['digest'])) and fileinfo == None:
+    if fm.file_exist(devicekey, request['digest']) and fileinfo == None:
         # file already fetched
         fileinfo = request
         fileinfo['fromdevice'] = devicekey
     else:
         # may update targets
         fileinfo = await db.add_fetching(devicekey, request['target'], request['digest'], request['length'])
-        path = await fm.file_create(devicekey, request['digest'])
+        path = await fm.file_create(devicekey, request['digest'], request['length'])
         try:
             startpos = fileinfo['completed_size']
             length = fileinfo['length']
@@ -96,6 +96,7 @@ async def handle_push_file(stream, request):
             else:
                 if not await fm.file_verify_digest(fileinfo['fromdevice'], fileinfo['digest']):
                     # cancel fetch
+                    fm.file_remove(devicekey, fileinfo['digest'])
                     await db.cancel_fetch(devicekey, fileinfo['digest'])
                     raise Exception('file digest mismatch')
         except Exception as e:
@@ -109,9 +110,15 @@ async def handle_push_file(stream, request):
         device_push_messages(devicekey)
 
 async def handle_get_file(stream, request):
-    path = await fm.file_path(request['from'], request['digest'])
+    if not fm.file_exist(request['from'], request['digest']):
+        sendjson(stream, {
+            'success': False,
+            'error': 'file not exist'
+        })
+        return
+    path = fm.file_path(request['from'], request['digest'])
     [start, end] = request['get_range']
-    await sendfile(strea, path, start, end - start)
+    await sendfile(stream, path, start, end - start)
 
 pushing_messages = set()
 async def device_push_messages_async(devicekey):
