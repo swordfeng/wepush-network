@@ -1,3 +1,4 @@
 __pycache__
 keys.json
 *.tmp
+data.db

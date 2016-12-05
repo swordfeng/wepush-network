@@ -10,14 +10,9 @@ import fm
 
 loop = asyncio.get_event_loop()
 
-handlers = {
-    'listen': handle_listen,
-    'push': handle_push,
-    'push_file': handle_push_file,
-    'get_file': handle_get_file
-}
-
+handlers = {}
 async def on_connection(stream):
+    print('new connection: {}'.format(stream.peer_key()))
     while True:
         try:
             request = await readjson(stream)
@@ -27,15 +22,16 @@ async def on_connection(stream):
         if not 'message' in request:
             stream.close()
             return
-        if not await handlers[request['messge']](stream, request):
+        if not await handlers[request['message']](stream, request):
             # ownership transfered to handler
             break
 
 listeners = {}
 async def handle_listen(stream, request):
+    print('{} listening'.format(stream.peer_key()))
     sendjson(stream, {'success': True})
     devicekey = stream.peer_key()
-    if devicekey in listeners:
+    if devicekey not in listeners:
         listeners[devicekey] = []
     heartbeat_task = asyncio.ensure_future(heartbeat(stream))
     listeners[devicekey].append(stream)
@@ -176,6 +172,15 @@ async def try_restart_file_async(fileinfo):
 
 def try_restart_file(fileinfo):
     asyncio.ensure_future(try_restart_file_async(fileinfo))
+
+handlers = {
+    'listen': handle_listen,
+    'push': handle_push,
+    'push_file': handle_push_file,
+    'get_file': handle_get_file
+}
+
+loop.run_until_complete(db.init())
 
 server = loop.run_until_complete(listen(('0.0.0.0', 12345), lambda stream: asyncio.ensure_future(on_connection(stream))))
 print('Server listening on 0.0.0.0:12345')

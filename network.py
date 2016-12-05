@@ -296,7 +296,7 @@ class WPStream:
     async def drain(self):
         await self.wpproto.drain()
     def peer_key(self):
-        return b64encode(self.wpproto.peer_key())
+        return b64encode(self.wpproto.peer_key()).decode()
     def peer_addr(self):
         return self.wpproto.peer_addr()
     def can_read(self):

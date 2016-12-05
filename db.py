@@ -12,14 +12,14 @@ async def init():
     db = await aioodbc.connect(dsn=dsn, loop=loop)
     async with db.cursor() as c:
         await c.execute('''
-        CREATE TABLE users IF NOT EXIST (username TEXT PRIMARY KEY, password TEXT);
-        CREATE TABLE devices IF NOT EXIST (devicekey TEXT PRIMARY KEY, username TEXT, description TEXT);
-        CREATE INDEX IF NOT EXIST devices_username_index ON devices (username);
-        CREATE TABLE messages IF NOT EXIST (mid INTEGER PRIMARY KEY ASC, devicekey TEXT, fromdevice TEXT, type TEXT, content_type TEXT, content TEXT, pushed INTEGER);
-        CREATE INDEX IF NOT EXIST messages_devicekey_pushed_index ON messages (devicekey, pushed);
-        CREATE TABLE fetching_files IF NOT EXIST (fromdevice TEXT, digest TEXT, filename TEXT, length INTEGER, completed_size INTEGER, PRIMARY KEY (fromdevice, digest));
-        CREATE TABLE fetching_targets IF NOT EXIST (fromdevice TEXT, digest TEXT, target TEXT, UNIQUE (fromdevice, digest, target));
-        CREATE INDEX IF NOT EXIST fetching_targets_index ON messages (fromdevice, digest);
+        CREATE TABLE IF NOT EXISTS users (username TEXT PRIMARY KEY, password TEXT);
+        CREATE TABLE IF NOT EXISTS devices (devicekey TEXT PRIMARY KEY, username TEXT, description TEXT);
+        CREATE INDEX IF NOT EXISTS devices_username_index ON devices (username);
+        CREATE TABLE IF NOT EXISTS messages (mid INTEGER PRIMARY KEY ASC, devicekey TEXT, fromdevice TEXT, type TEXT, content_type TEXT, content TEXT, pushed INTEGER);
+        CREATE INDEX IF NOT EXISTS messages_devicekey_pushed_index ON messages (devicekey, pushed);
+        CREATE TABLE IF NOT EXISTS fetching_files (fromdevice TEXT, digest TEXT, filename TEXT, length INTEGER, completed_size INTEGER, PRIMARY KEY (fromdevice, digest));
+        CREATE TABLE IF NOT EXISTS fetching_targets (fromdevice TEXT, digest TEXT, target TEXT, UNIQUE (fromdevice, digest, target));
+        CREATE INDEX IF NOT EXISTS fetching_targets_index ON fetching_targets (fromdevice, digest);
         ''')
 
 def __init__():
@@ -65,7 +65,7 @@ async def cancel_fetching(devicekey, digest):
 
 async def get_unpushed_messages(devicekey):
     async with db.cursor() as c:
-        await c.execute('SELECT * FROM messages WHERE devicekey = ? AND pushed = 0', devicekey, digest)
+        await c.execute('SELECT * FROM messages WHERE devicekey = ? AND pushed = 0', devicekey)
         return await c.fetchall()
 async def set_message_pushed(mid):
     async with db.cursor() as c:

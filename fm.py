@@ -30,7 +30,8 @@ def fndecode(fncode):
                 result += '+'
             elif c == 'c':
                 result += '/'
-            else raise Exception('invalid code')
+            else:
+                raise Exception('invalid code')
             shift = False
         else:
             if c == 'i':
