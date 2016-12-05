@@ -87,16 +87,21 @@ status
     response:
         registered: true|false <boolean>
         user: username (if registered) <string>
+        devices: device info (if registered) <[{"devicekey": string, "description": string}...]>
         (and other info...)
 register_device
     register this device as a specific user
     params:
-        user: username <string>
+        username: username <string>
         password: password <string>
+        description: description(displayname?) of this device <string>
     (server retrieve device pkey from connection info)
 register_user
     register a new user
-    params: same as register_device
+    params:
+        username: username <string>
+        password: password <string>
+        description: description(displayname?) of current device <string>
 
 Server Messages
 ---------------

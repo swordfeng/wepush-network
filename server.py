@@ -16,6 +16,7 @@ async def on_connection(stream):
     while True:
         try:
             request = await readjson(stream)
+            print('{} requests: {}'.format(stream.peer_key(), request))
         except:
             stream.close()
             return
@@ -102,7 +103,7 @@ async def handle_push_file(stream, request):
             return
     sendjson(stream, {'success': True})
     for devicekey in fileinfo['target']:
-        await db.push_file(devicekey, fileinfo['fromdevice'], fileinfo['content_type'], fileinfo['digest'], fileinfo['length'])
+        await db.push_file(devicekey, fileinfo['fromdevice'], fileinfo['content_type'], fileinfo['digest'], fileinfo['length'], fileinfo['filename'])
         device_push_messages(devicekey)
 
 async def handle_get_file(stream, request):
@@ -115,6 +116,34 @@ async def handle_get_file(stream, request):
     path = fm.file_path(request['from'], request['digest'])
     [start, end] = request['get_range']
     await sendfile(stream, path, start, end - start)
+
+async def handle_status(stream, request):
+    username = await db.get_user(stream.peer_key())
+    result = {'registered': False}
+    if username != None:
+        result['registered'] = True
+        result['username'] = username
+        result['devices'] = await db.get_devices(username)
+    sendjson(stream, result)
+
+async def handle_register_device(stream, request):
+    try:
+        await db.register_device(stream.peer_key(), request['description'], request['username'], request['password'])
+        sendjson(stream, {'success': True})
+    except db.AuthError:
+        sendjson(stream, {'success': False, 'error': 'invalid username or password'})
+    except:
+        sendjson(stream, {'success': False, 'error': 'failed to register device'})
+
+async def handle_register_user(stream, request):
+    print('{} register user {}'.format(stream.peer_key(), request['username']))
+    try:
+        await db.register_user(request['username'], request['password'])
+    except BaseException:
+        sendjson(stream, {'success': False, 'error': 'failed to register'})
+        return
+    await db.register_device(stream.peer_key(), request['description'], request['username'], request['password'])
+    sendjson(stream, {'success': True})
 
 pushing_messages = set()
 async def device_push_messages_async(devicekey):
@@ -177,7 +206,10 @@ handlers = {
     'listen': handle_listen,
     'push': handle_push,
     'push_file': handle_push_file,
-    'get_file': handle_get_file
+    'get_file': handle_get_file,
+    'status': handle_status,
+    'register_user': handle_register_user,
+    'register_device': handle_register_device
 }
 
 loop.run_until_complete(db.init())

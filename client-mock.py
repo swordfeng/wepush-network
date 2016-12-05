@@ -47,8 +47,12 @@ client = ClientEndpoint(('127.0.0.1', 12345))
 
 async def init():
     task = asyncio.ensure_future(client.daemon())
-    await asyncio.sleep(5)
-    #stream = connect(('127.0.0.1', 12345))
+    await asyncio.sleep(1)
+    stream = await connect(('127.0.0.1', 12345))
+    sendjson(stream, {'message': 'register_device', 'username': 'swordfeng', 'password': '123456', 'description': 'testdevice'})
+    print(await readjson(stream))
+    sendjson(stream, {'message': 'status'})
+    print(await readjson(stream))
     await task
 
 loop.run_until_complete(init())
