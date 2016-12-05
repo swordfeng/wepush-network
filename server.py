@@ -19,10 +19,10 @@ async def on_connection(stream):
         except:
             stream.close()
             return
-        if not 'message' in request:
+        if 'message' not in request:
             stream.close()
             return
-        if not await handlers[request['message']](stream, request):
+        if await handlers[request['message']](stream, request):
             # ownership transfered to handler
             break
 
@@ -32,9 +32,9 @@ async def handle_listen(stream, request):
     sendjson(stream, {'success': True})
     devicekey = stream.peer_key()
     if devicekey not in listeners:
-        listeners[devicekey] = []
+        listeners[devicekey] = set()
     heartbeat_task = asyncio.ensure_future(heartbeat(stream))
-    listeners[devicekey].append(stream)
+    listeners[devicekey].add(stream)
     # push unpushed messages
     device_push_messages(devicekey)
     # restart unfetched files
@@ -48,14 +48,14 @@ async def heartbeat(stream):
             await asyncio.sleep(30)
             sendjson(stream, {'message': 'heartbeat'})
             await readjson(stream)
+            print('{} heartbeat'.format(stream.peer_key()))
     except NetworkClosedException:
         devicekey = stream.peer_key()
-        ls = listeners[devicekey]
-        for i in range(0, len(ls)):
-            if ls[i] == stream:
-                del ls[i]
+        print('{} lost connection'.format(devicekey))
+        listeners[devicekey].discard(stream)
     finally:
-        stream.close()
+        #stream.close()
+        pass
 
 async def handle_push(stream, request):
     # insert message into database
