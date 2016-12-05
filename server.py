@@ -150,21 +150,22 @@ async def device_push_messages_async(devicekey):
     if devicekey in pushing_messages:
         return
     pushing_messages.add(devicekey)
+    print('start pushing for {}'.format(devicekey))
     messages = await db.get_unpushed_messages(devicekey)
     if devicekey not in listeners:
         return
+    stream = random.choice(tuple(listeners[devicekey]))
     for message in messages:
         if len(listeners[devicekey]) == 0:
             return
-        stream = random.choice(listeners[devicekey])
         try:
-            if message.type == 'text':
+            if message['type'] == 'text':
                 sendjson(stream, {
                     'message': 'push',
                     'content_type': message['content_type'],
                     'content': message['content']
                 })
-            elif message.type == 'file':
+            elif message['type'] == 'file':
                 sendjson(stream, {
                     'message': 'push_file',
                     'content_type': message['content_type'],
@@ -174,7 +175,10 @@ async def device_push_messages_async(devicekey):
                 })
             result = await readjson(stream)
             if result['success']:
-                await db.set_message_pushed(message.mid)
+                await db.set_message_pushed(message['mid'])
+        except NetworkClosedException:
+            listeners[devicekey].discard(stream)
+            return await device_push_messages_async(devicekey)
         except Exception as e:
             print(e)
             # ??
@@ -189,7 +193,7 @@ async def try_restart_file_async(fileinfo):
         return
     if len(listeners[devicekey]) == 0:
         return
-    stream = random.choice(listeners[devicekey])
+    stream = random.choice(tuple(listeners[devicekey]))
     sendjson(stream, {
         'message': 'restart_file',
         'digest': fileinfo['digest']
