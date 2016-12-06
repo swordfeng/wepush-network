@@ -123,6 +123,9 @@ async def handle_get_file(stream, request):
         return
     path = fm.file_path(request['from'], request['digest'])
     [start, end] = request['get_range']
+    sendjson(stream, {
+        'success': True
+    })
     await sendfile(stream, path, start, end - start)
 
 async def handle_status(stream, request):

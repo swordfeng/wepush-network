@@ -268,7 +268,6 @@ class WPStream:
             if len(self.readbuffer) >= READ_BUFFER_HIGH_WATER_MARK:
                 self.wpproto.pause()
     def _close(self, exc):
-        print('closed!')
         self.readable = False
         self.writable = False
         self.exc = exc

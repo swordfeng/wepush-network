@@ -61,6 +61,10 @@ async def init():
     if 'get_range' in r:
         await sendfile(stream, 'proto_design.txt', r['get_range'][0], r['get_range'][1])
         print(await readjson(stream))
+    sendjson(stream, {'message': 'get_file', 'from': 'FioVevEmxSnYFyvs1cxWakudeRpqK8f9mw3z3Y1HRvg=',
+        'digest': '87334a310d1cb6a985b11291212b6c8feabd1f20b0a2c40cd668261ab84eb66d', 'get_range': [0, 5360]})
+    print(await readjson(stream))
+    await recvfile(stream, 'proto.tmp', 0, 5360)
     await task
 
 loop.run_until_complete(init())
