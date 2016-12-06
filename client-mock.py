@@ -54,6 +54,13 @@ async def init():
     print(await readjson(stream))
     sendjson(stream, {'message': 'push', 'content_type': 'text/plain', 'content': 'testtext', 'target': ['FioVevEmxSnYFyvs1cxWakudeRpqK8f9mw3z3Y1HRvg=']})
     print(await readjson(stream))
+    sendjson(stream, {'message': 'push_file', 'content_type': 'text/plain', 'target': ['FioVevEmxSnYFyvs1cxWakudeRpqK8f9mw3z3Y1HRvg='],
+        'filename': 'proto_design.txt', 'length': 5360, 'digest': '87334a310d1cb6a985b11291212b6c8feabd1f20b0a2c40cd668261ab84eb66d'})
+    r = await readjson(stream)
+    print(r)
+    if 'get_range' in r:
+        await sendfile(stream, 'proto_design.txt', r['get_range'][0], r['get_range'][1])
+        print(await readjson(stream))
     await task
 
 loop.run_until_complete(init())

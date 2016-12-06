@@ -58,14 +58,15 @@ def file_path(devicekey, digest):
     return filedir + '/' + fnencode(devicekey) + '_' + digest
 def file_exist(devicekey, digest):
     path = file_path(devicekey, digest)
-    return os.path.is_file(path)
+    return os.path.exists(path)
 async def file_create(devicekey, digest, length):
     path = file_path(devicekey, digest)
     async with aiofiles.open(path, 'ab') as f:
         f.truncate(length)
+    return path
 async def file_verify_digest(devicekey, digest):
     path = file_path(devicekey, digest)
-    if not os.path.is_file(path):
+    if not os.path.exists(path):
         return False
     return digest.lower() == await loop.run_in_executor(pool, do_digest, path)
 def file_remove(devicekey, digest):

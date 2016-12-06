@@ -19,7 +19,7 @@ async def init():
             CREATE INDEX IF NOT EXISTS devices_username_index ON devices (username);
             CREATE TABLE IF NOT EXISTS messages (mid INTEGER PRIMARY KEY ASC, devicekey TEXT, fromdevice TEXT, type TEXT, content_type TEXT, content TEXT, pushed INTEGER);
             CREATE INDEX IF NOT EXISTS messages_devicekey_pushed_index ON messages (devicekey, pushed);
-            CREATE TABLE IF NOT EXISTS fetching_files (fromdevice TEXT, digest TEXT, filename TEXT, length INTEGER, completed_size INTEGER, PRIMARY KEY (fromdevice, digest));
+            CREATE TABLE IF NOT EXISTS fetching_files (fromdevice TEXT, digest TEXT, filename TEXT, length INTEGER, content_type TEXT, completed_size INTEGER, PRIMARY KEY (fromdevice, digest));
             CREATE TABLE IF NOT EXISTS fetching_targets (fromdevice TEXT, digest TEXT, target TEXT, UNIQUE (fromdevice, digest, target));
             CREATE INDEX IF NOT EXISTS fetching_targets_index ON fetching_targets (fromdevice, digest);
             ''')
@@ -58,7 +58,8 @@ async def get_device_fetching(devicekey):
                     'digest': t[1],
                     'filename': t[2],
                     'length': t[3],
-                    'completed_size': t[4]
+                    'content_type': t[4],
+                    'completed_size': t[5]
                 })
             return result
 async def get_fetching(devicekey, digest):
@@ -72,24 +73,28 @@ async def get_fetching(devicekey, digest):
                     'digest': t[1],
                     'filename': t[2],
                     'length': t[3],
-                    'completed_size': t[4]
+                    'content_type': t[4],
+                    'completed_size': t[5]
                 }
+                await c.execute('SELECT target FROM fetching_targets WHERE fromdevice = ? AND digest = ?', devicekey, digest)
+                targets = [x[0] for x in await c.fetchall()]
+                t['target'] = targets
             return t
-async def add_fetching(devicekey, targets, filename, digest, length):
+async def add_fetching(devicekey, targets, filename, digest, length, content_type):
     async with db.acquire() as conn:
         async with conn.cursor() as c:
-            await c.execute('INSERT OR IGNORE INTO fetching_files VALUES (?, ?, ?, ?, 0)', devicekey, digest, filename, length)
+            await c.execute('INSERT OR IGNORE INTO fetching_files VALUES (?, ?, ?, ?, ?, 0)', devicekey, digest, filename, length, content_type)
             for target in targets:
                 await c.execute('INSERT OR IGNORE INTO fetching_targets VALUES (?, ?, ?)', devicekey, digest, target)
 async def set_fetching_completed(devicekey, digest, pos):
     async with db.acquire() as conn:
         async with conn.cursor() as c:
             await c.execute('UPDATE fetching_files SET completed_size = ? WHERE fromdevice = ? AND digest = ?', pos, devicekey, digest)
-async def cancel_fetching(devicekey, digest):
+async def del_fetching(devicekey, digest):
     async with db.acquire() as conn:
         async with conn.cursor() as c:
-            await c.execute('DELETE fetching_files WHERE fromdevice = ? AND digest = ?', devicekey, digest)
-            await c.execute('DELETE fetching_targets WHERE fromdevice = ? AND digest = ?', devicekey, digest)
+            await c.execute('DELETE FROM fetching_files WHERE fromdevice = ? AND digest = ?', devicekey, digest)
+            await c.execute('DELETE FROM fetching_targets WHERE fromdevice = ? AND digest = ?', devicekey, digest)
 
 async def get_unpushed_messages(devicekey):
     async with db.acquire() as conn:

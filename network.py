@@ -254,6 +254,7 @@ class WPStream:
         self.wpproto = wpproto
         self.readbuffer = []
         self.readfuture = []
+        self.closehandler = []
         self.readable = True
         self.writable = True
         self.exc = None
@@ -267,11 +268,17 @@ class WPStream:
             if len(self.readbuffer) >= READ_BUFFER_HIGH_WATER_MARK:
                 self.wpproto.pause()
     def _close(self, exc):
+        print('closed!')
         self.readable = False
         self.writable = False
         self.exc = exc
         for future in self.readfuture:
             future.set_exception(NetworkClosedException() if exc == None else exc)
+        for handler in self.closehandler:
+            try:
+                handler(self.exc)
+            except BaseException as e:
+                print(e)
     def read(self):
         result = asyncio.Future()
         if len(self.readbuffer) > 0:
@@ -305,6 +312,14 @@ class WPStream:
         return writable
     def get_exception(self):
         return self.exc
+    def on_close(self, closehandler):
+        if not self.readable and not self.writable:
+            try:
+                closehandler(self.exc)
+            except BaseException as e:
+                print(e)
+        else:
+            self.closehandler.append(closehandler)
 
 class NetworkException(Exception):
     pass

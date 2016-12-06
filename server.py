@@ -7,6 +7,7 @@ from network import *
 from netutil import *
 import db
 import fm
+import traceback
 
 loop = asyncio.get_event_loop()
 
@@ -35,6 +36,7 @@ async def handle_listen(stream, request):
     if devicekey not in listeners:
         listeners[devicekey] = set()
     heartbeat_task = asyncio.ensure_future(heartbeat(stream))
+    stream.on_close(lambda e: listener_closed(stream, e))
     listeners[devicekey].add(stream)
     # push unpushed messages
     device_push_messages(devicekey)
@@ -43,6 +45,12 @@ async def handle_listen(stream, request):
         try_restart_file(fileinfo)
     return True
 
+def listener_closed(stream, e):
+    devicekey = stream.peer_key()
+    listeners[devicekey].discard(stream)
+    print('{} lost connection: {}, ramain {}'.format(devicekey, stream, len(listeners[devicekey])))
+    device_push_messages(devicekey)
+
 async def heartbeat(stream):
     try:
         while True:
@@ -50,13 +58,8 @@ async def heartbeat(stream):
             sendjson(stream, {'message': 'heartbeat'})
             await readjson(stream)
             print('{} heartbeat'.format(stream.peer_key()))
-    except NetworkClosedException:
-        devicekey = stream.peer_key()
-        print('{} lost connection'.format(devicekey))
-        listeners[devicekey].discard(stream)
-    finally:
-        #stream.close()
-        pass
+    except BaseException as e:
+        stream.close()
 
 async def handle_push(stream, request):
     # insert message into database
@@ -75,7 +78,8 @@ async def handle_push_file(stream, request):
         fileinfo['fromdevice'] = devicekey
     else:
         # may update targets
-        fileinfo = await db.add_fetching(devicekey, request['target'], request['filename'], request['digest'], request['length'])
+        await db.add_fetching(devicekey, request['target'], request['filename'], request['digest'], request['length'], request['content_type'])
+        fileinfo = await db.get_fetching(devicekey, request['digest'])
         path = await fm.file_create(devicekey, request['digest'], request['length'])
         try:
             startpos = fileinfo['completed_size']
@@ -94,10 +98,14 @@ async def handle_push_file(stream, request):
                 if not await fm.file_verify_digest(fileinfo['fromdevice'], fileinfo['digest']):
                     # cancel fetch
                     fm.file_remove(devicekey, fileinfo['digest'])
-                    await db.cancel_fetching(devicekey, fileinfo['digest'])
+                    await db.del_fetching(devicekey, fileinfo['digest'])
                     raise Exception('file digest mismatch')
+                else:
+                    # finished
+                    await db.del_fetching(devicekey, fileinfo['digest'])
         except Exception as e:
-            print('error when fetching file:', e)
+            print('error when fetching file:')
+            print(''.join(traceback.format_exception(None, e, e.__traceback__)))
             try_restart_file(fileinfo)
             sendjson(stream, {'success': False, 'error': 'fail to fetch'})
             return
@@ -119,7 +127,7 @@ async def handle_get_file(stream, request):
 
 async def handle_status(stream, request):
     username = await db.get_user(stream.peer_key())
-    result = {'registered': False}
+    result = {'registered': False, 'success': True}
     if username != None:
         result['registered'] = True
         result['username'] = username
@@ -145,44 +153,46 @@ async def handle_register_user(stream, request):
     await db.register_device(stream.peer_key(), request['description'], request['username'], request['password'])
     sendjson(stream, {'success': True})
 
-pushing_messages = set()
+pushing_messages = {}
 async def device_push_messages_async(devicekey):
     if devicekey in pushing_messages:
+        pushing_messages[devicekey] = True
         return
-    pushing_messages.add(devicekey)
-    print('start pushing for {}'.format(devicekey))
-    messages = await db.get_unpushed_messages(devicekey)
-    if devicekey not in listeners:
-        return
-    stream = random.choice(tuple(listeners[devicekey]))
-    for message in messages:
+    pushing_messages[devicekey] = True
+    while pushing_messages[devicekey]:
+        pushing_messages[devicekey] = False
+        messages = await db.get_unpushed_messages(devicekey)
+        if len(messages) == 0:
+            break
+        print('pushing {} messages for {}'.format(len(messages), devicekey))
+        if devicekey not in listeners:
+            break
         if len(listeners[devicekey]) == 0:
-            return
-        try:
-            if message['type'] == 'text':
-                sendjson(stream, {
-                    'message': 'push',
-                    'content_type': message['content_type'],
-                    'content': message['content']
-                })
-            elif message['type'] == 'file':
-                sendjson(stream, {
-                    'message': 'push_file',
-                    'content_type': message['content_type'],
-                    'filename': message['filename'],
-                    'length': message['length'],
-                    'digest': message['digest']
-                })
-            result = await readjson(stream)
-            if result['success']:
-                await db.set_message_pushed(message['mid'])
-        except NetworkClosedException:
-            listeners[devicekey].discard(stream)
-            return await device_push_messages_async(devicekey)
-        except Exception as e:
-            print(e)
-            # ??
-    pushing_messages.discard(devicekey)
+            break
+        stream = random.choice(tuple(listeners[devicekey]))
+        for message in messages:
+            try:
+                if message['type'] == 'text':
+                    sendjson(stream, {
+                        'message': 'push',
+                        'content_type': message['content_type'],
+                        'content': message['content']
+                    })
+                elif message['type'] == 'file':
+                    sendjson(stream, {
+                        'message': 'push_file',
+                        'content_type': message['content_type'],
+                        'filename': message['filename'],
+                        'length': message['length'],
+                        'digest': message['digest']
+                    })
+                result = await readjson(stream)
+                if result['success']:
+                    await db.set_message_pushed(message['mid'])
+            except Exception as e:
+                print(traceback.format_exception(None, e, e.__traceback__))
+                # ??
+    del pushing_messages[devicekey]
 
 def device_push_messages(devicekey):
     asyncio.ensure_future(device_push_messages_async(devicekey))
@@ -194,14 +204,18 @@ async def try_restart_file_async(fileinfo):
     if len(listeners[devicekey]) == 0:
         return
     stream = random.choice(tuple(listeners[devicekey]))
-    sendjson(stream, {
-        'message': 'restart_file',
-        'digest': fileinfo['digest']
-    })
-    result = await readjson(stream)
-    if not result['success']:
-        print('restart sending error:', result['error'])
-        await db.cancel_fetching(fileinfo['fromdevice'], fileinfo['digest'])
+    try:
+        sendjson(stream, {
+            'message': 'restart_file',
+            'digest': fileinfo['digest']
+        })
+        result = await readjson(stream)
+        if not result['success']:
+            print('restart sending error:', result['error'])
+            fm.file_remove(devicekey, fileinfo['digest'])
+            await db.del_fetching(fileinfo['fromdevice'], fileinfo['digest'])
+    except BaseException as e:
+        print(''.join(traceback.format_exception(None, e, e.__traceback__)))
 
 def try_restart_file(fileinfo):
     asyncio.ensure_future(try_restart_file_async(fileinfo))
