@@ -44,12 +44,14 @@ class ClientEndpoint():
             print(e)
             stream.close()
 
-client = ClientEndpoint(('127.0.0.1', 12345))
+addr = ('127.0.0.1', 12345)
+
+client = ClientEndpoint(addr)
 
 async def init():
     task = asyncio.ensure_future(client.daemon())
     await asyncio.sleep(1)
-    stream = await connect(('127.0.0.1', 12345))
+    stream = await connect(addr)
     sendjson(stream, {'message': 'status'})
     print(await readjson(stream))
     sendjson(stream, {'message': 'push', 'content_type': 'text/plain', 'content': 'testtext', 'target': ['FioVevEmxSnYFyvs1cxWakudeRpqK8f9mw3z3Y1HRvg=']})
