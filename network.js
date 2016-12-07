@@ -84,7 +84,7 @@ let connect = co.wrap(function *(host, port) {
     let keypair = sodium.crypto_hash_sha512(shared_secret);
     stream.recv_key = keypair.slice(0, 32);
     stream.send_key = keypair.slice(32);
-    // finished here
+    // handshake finished here
 
     return stream;
 })
@@ -167,3 +167,5 @@ co(function *() {
     stream.end();
 })
 */
+
+module.exports = { connect, keys };
