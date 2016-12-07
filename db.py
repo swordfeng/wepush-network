@@ -135,8 +135,7 @@ async def get_devices(username):
     async with db.acquire() as conn:
         async with conn.cursor() as c:
             await c.execute('SELECT devicekey, description FROM devices WHERE username = ?', username)
-            t = await c.fetchone()
-            return {'devicekey': t[0], 'description': t[1]}
+            return [{'devicekey': t[0], 'description': t[1]} for t in await c.fetchall()]
 
 async def register_user(username, password):
     hpass = crypto_pwhash_scryptsalsa208sha256_str(password, 10000, 10000).decode()
