@@ -1,0 +1,25 @@
+{
+  "name": "wepush-server-js-client",
+  "version": "1.0.0",
+  "description": "",
+  "main": "network.js",
+  "dependencies": {
+    "chacha": "^2.1.0",
+    "co": "^4.6.0",
+    "sodium": "^2.0.1"
+  },
+  "devDependencies": {},
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/swordfeng/wepush-network.git"
+  },
+  "author": "",
+  "license": "custom",
+  "bugs": {
+    "url": "https://github.com/swordfeng/wepush-network/issues"
+  },
+  "homepage": "https://github.com/swordfeng/wepush-network#readme"
+}

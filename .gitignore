@@ -3,3 +3,4 @@ keys.json
 *.tmp
 data.db
 files/
+node_modules/
