@@ -34,6 +34,13 @@ async def push_message(target, fromdevice, content_type, content):
             INSERT INTO messages(devicekey, fromdevice, type, content_type, content, pushed)
             VALUES (?, ?, ?, ?, ?, 0)
             ''', target, fromdevice, 'text', content_type, content)
+async def push_clipboard(target, fromdevice, content_type, content):
+    async with db.acquire() as conn:
+        async with conn.cursor() as c:
+            await c.execute('''
+            INSERT INTO messages(devicekey, fromdevice, type, content_type, content, pushed)
+            VALUES (?, ?, ?, ?, ?, 0)
+            ''', target, fromdevice, 'clipboard', content_type, content)
 async def push_file(target, fromdevice, content_type, digest, length, filename):
     content = json.dumps({
         'digest': digest,

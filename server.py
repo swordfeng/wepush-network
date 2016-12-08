@@ -68,6 +68,13 @@ async def handle_push(stream, request):
         device_push_messages(devicekey)
     sendjson(stream, {'success': True})
 
+async def handle_push_clipboard(stream, request):
+    # insert message into database
+    for devicekey in request['target']:
+        await db.push_clipboard(devicekey, stream.peer_key(), request['content_type'], request['content'])
+        device_push_messages(devicekey)
+    sendjson(stream, {'success': True})
+
 async def handle_push_file(stream, request):
     devicekey = stream.peer_key()
     # add file to fetching_files if not added and (file not exist or digest mismatch)
@@ -181,6 +188,12 @@ async def device_push_messages_async(devicekey):
                         'content_type': message['content_type'],
                         'content': message['content']
                     })
+                elif message['type'] == 'clipboard':
+                    sendjson(stream, {
+                        'message': 'push_clipboard',
+                        'content_type': message['content_type'],
+                        'content': message['content']
+                    })
                 elif message['type'] == 'file':
                     sendjson(stream, {
                         'message': 'push_file',
@@ -226,6 +239,7 @@ def try_restart_file(fileinfo):
 handlers = {
     'listen': handle_listen,
     'push': handle_push,
+    'push_clipboard': handle_push_clipboard,
     'push_file': handle_push_file,
     'get_file': handle_get_file,
     'status': handle_status,
