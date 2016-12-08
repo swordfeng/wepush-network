@@ -186,13 +186,15 @@ async def device_push_messages_async(devicekey):
                     sendjson(stream, {
                         'message': 'push',
                         'content_type': message['content_type'],
-                        'content': message['content']
+                        'content': message['content'],
+                        'fromdevice': message['fromdevice']
                     })
                 elif message['type'] == 'clipboard':
                     sendjson(stream, {
                         'message': 'push_clipboard',
                         'content_type': message['content_type'],
-                        'content': message['content']
+                        'content': message['content'],
+                        'fromdevice': message['fromdevice']
                     })
                 elif message['type'] == 'file':
                     sendjson(stream, {
@@ -200,7 +202,8 @@ async def device_push_messages_async(devicekey):
                         'content_type': message['content_type'],
                         'filename': message['filename'],
                         'length': message['length'],
-                        'digest': message['digest']
+                        'digest': message['digest'],
+                        'fromdevice': message['fromdevice']
                     })
                 result = await readjson(stream)
                 if result['success']:

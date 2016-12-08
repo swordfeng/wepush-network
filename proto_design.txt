@@ -110,6 +110,7 @@ push
     params:
         content_type: mime type <string>
         content: content <string>
+        fromdevice: deviceid <string>
 push_clipboard
     push clipboard content
     params: same as push
@@ -120,6 +121,7 @@ push_file
         filename: filename <string>
         length: file length <int>
         digest: hash <string>
+        fromdevice: deviceid <string>
     client invoke get_file request after this message
 restart_file
     make a client retransmit a file
