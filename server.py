@@ -210,7 +210,7 @@ async def device_push_messages_async(devicekey):
                 if result['success']:
                     await db.set_message_pushed(message['mid'])
             except Exception as e:
-                print(traceback.format_exception(None, e, e.__traceback__))
+                print(''.join(traceback.format_exception(None, e, e.__traceback__)))
                 # ??
     del pushing_messages[devicekey]
 
