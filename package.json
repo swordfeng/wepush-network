@@ -4,6 +4,7 @@
   "description": "",
   "main": "network.js",
   "dependencies": {
+    "bluebird": "^3.4.6",
     "chacha": "^2.1.0",
     "co": "^4.6.0",
     "sodium": "^2.0.1"

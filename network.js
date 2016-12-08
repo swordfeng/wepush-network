@@ -3,9 +3,11 @@ const net = require('net');
 const sodium = require('sodium').api;
 const crypto = require('crypto');
 const chacha = require('chacha');
-const fs = require('fs');
+let Promise = require('bluebird');
+const fs = Promise.promisifyAll(require('fs'));
 
 const randomBytes = crypto.randomBytes;
+process.on('unhandledRejection', e => console.error(e.stack));
 
 let keys = {
     PK_SIZE: sodium.crypto_sign_ed25519_PUBLICKEYBYTES,
@@ -130,8 +132,25 @@ Stream.prototype.write = function (buf) {
     let tag = cipher.getAuthTag();
     this.stream.write(Buffer.concat([len, tag, encbuf]));
 }
-Stream.prototype.sendjson = function () {}
-Stream.prototype.sendfile = function () {}
+Stream.prototype.sendjson = function (obj) {
+    let buf = new Buffer(JSON.stringify(obj));
+    this.write(buf);
+}
+Stream.prototype.sendfile = co.wrap(function *(filename, pos, len) {
+    let fd = fs.openSync(filename, 'r');
+    try {
+        while (len > 0) {
+            let sendlen = len > 4096 ? 4096 : len;
+            let buf = new Buffer(sendlen);
+            yield fs.readAsync(fd, buf, 0, sendlen, pos);
+            len -= sendlen;
+            pos += sendlen;
+            this.write(buf);
+        }
+    } finally {
+        fs.closeSync(fd);
+    }
+})
 
 Stream.prototype.read = co.wrap(function *() {
     let len = (yield this.readbuf(2)).readUInt16LE(0);
@@ -143,15 +162,29 @@ Stream.prototype.read = co.wrap(function *() {
     decipher.final();
     return data;
 })
-Stream.prototype.readjson = function () {}
-Stream.prototype.readfile = function () {}
+Stream.prototype.readjson = function () {
+    return this.read().then(buf => JSON.parse(buf.toString()));
+}
+Stream.prototype.readfile = co.wrap(function *(filename, pos, len) {
+    let fd = fs.openSync(filename, 'a');
+    try {
+        while (len > 0) {
+            let buf = yield this.read();
+            let recvlen = buf.length;
+            yield fs.writeAsync(fd, buf, 0, recvlen, pos);
+            len -= recvlen;
+            pos += recvlen;
+        }
+    } finally {
+        fs.closeSync(fd);
+    }
+})
 
 Stream.prototype.end = function () {
     this.stream.end();
 }
 
 // test
-/*
 co(function *() {
     let stream = yield connect('127.0.0.1', 22345);
     stream.write(new Buffer('hello, world'));
@@ -164,8 +197,9 @@ co(function *() {
     console.log((yield stream.read()).toString());
     console.log((yield stream.read()).toString());
     console.log((yield stream.read()).toString());
+    stream.sendfile('proto_design.txt', 0, 5300);
+    yield stream.readfile('protottt', 0, 5300);
     stream.end();
 })
-*/
 
 module.exports = { connect, keys };
