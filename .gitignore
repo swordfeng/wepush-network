@@ -4,3 +4,4 @@ keys.json
 data.db
 files/
 node_modules/
+virtualenv/
