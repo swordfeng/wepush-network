@@ -59,6 +59,7 @@ async def heartbeat(stream):
             await readjson(stream)
             print('{} heartbeat'.format(stream.peer_key()))
     except BaseException as e:
+        listeners[stream.peer_key()].discard(stream)
         stream.close()
 
 async def handle_push(stream, request):
