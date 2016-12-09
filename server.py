@@ -17,8 +17,9 @@ async def on_connection(stream):
     while True:
         try:
             request = await readjson(stream)
-            print('{} requests: {}'.format(stream.peer_key(), request))
-        except:
+            print('{} requests: {}'.format(stream.peer_key(), str(request).encode('unicode-escape').decode()))
+        except BaseException as e:
+            print(''.join(traceback.format_exception(None, e, e.__traceback__)))
             stream.close()
             return
         if 'message' not in request:
@@ -155,7 +156,7 @@ async def handle_register_device(stream, request):
         sendjson(stream, {'success': False, 'error': 'failed to register device'})
 
 async def handle_register_user(stream, request):
-    print('{} register user {}'.format(stream.peer_key(), request['username']))
+    print('{} register user {}'.format(stream.peer_key(), request['username'].encode('unicode-escape').decode()))
     try:
         await db.register_user(request['username'], request['password'])
     except BaseException:
