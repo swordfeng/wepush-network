@@ -18,6 +18,8 @@ async def on_connection(stream):
         try:
             request = await readjson(stream)
             print('{} requests: {}'.format(stream.peer_key(), str(request).encode('unicode-escape').decode()))
+        except NetworkClosedException:
+            return
         except BaseException as e:
             print(''.join(traceback.format_exception(None, e, e.__traceback__)))
             stream.close()
