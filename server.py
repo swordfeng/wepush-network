@@ -123,13 +123,13 @@ async def handle_push_file(stream, request):
         device_push_messages(devicekey)
 
 async def handle_get_file(stream, request):
-    if not fm.file_exist(request['from'], request['digest']):
+    if not fm.file_exist(request['fromdevice'], request['digest']):
         sendjson(stream, {
             'success': False,
             'error': 'file not exist'
         })
         return
-    path = fm.file_path(request['from'], request['digest'])
+    path = fm.file_path(request['fromdevice'], request['digest'])
     [start, end] = request['get_range']
     sendjson(stream, {
         'success': True

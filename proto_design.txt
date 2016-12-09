@@ -76,7 +76,7 @@ push_file
 get_file
     get a file pushed to this device
     params:
-        from: device <string>
+        fromdevice: device <string>
         digest: hashsum <string>
         get_range: a range in the file <[int, int]>
     server first send a response and, if success, enter File Mode
